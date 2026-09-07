@@ -6,11 +6,18 @@
 #   dispatch=foreground = real SendInput).
 # Actions: list_apps, get_app_state, click, click_element, set_value, type, key,
 #   scroll, drag, open_app. Usage: powershell -NoProfile -ExecutionPolicy Bypass
-#   -File <this> -Action <action> -PayloadJson "<json>"; writes ONE JSON doc to stdout.
+#   -File <this> -Action <action> -PayloadStdin (or -PayloadJson "<json>"); writes ONE JSON doc to stdout.
 param(
   [string]$Action,
-  [string]$PayloadJson = ''
+  [string]$PayloadJson = '',
+  [switch]$PayloadStdin
 )
+
+try {
+  [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+} catch { }
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -106,13 +113,6 @@ public static class DshWin32
     {
       try { SetProcessDPIAware(); } catch { }
     }
-  }
-
-  public static IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
-  {
-    IntPtr res;
-    SendMessageTimeout(hWnd, msg, wParam, lParam, SMTO_ABORTIFHUNG, 3000, out res);
-    return res;
   }
 
   public static List<WinInfo> EnumWindowsList()
@@ -698,7 +698,20 @@ function Do-AppState {
 # ---------------------------------------------------------------- actions
 
 $script:payload = $null
-if ($PayloadJson) { $script:payload = $PayloadJson | ConvertFrom-Json }
+$rawJson = ''
+if ($PayloadStdin -or ((-not $PayloadJson) -and [Console]::IsInputRedirected)) {
+  try {
+    $rawJson = [Console]::In.ReadToEnd()
+  } catch {
+    $rawJson = ''
+  }
+}
+if ((-not $rawJson) -and $PayloadJson) {
+  $rawJson = $PayloadJson
+}
+if ($rawJson -and $rawJson.Trim().Length -gt 0) {
+  $script:payload = $rawJson | ConvertFrom-Json
+}
 
 $result = @{ ok = $true; action = $Action; message = '' }
 
@@ -1006,7 +1019,8 @@ try {
             if ($down) { $delta = -$delta }
             $wParam = [IntPtr]($delta -shl 16)
             $lParam = [IntPtr](($sy -band 0xFFFF) -shl 16 -bor ($sx -band 0xFFFF))
-            $null = [DshWin32]::SendMessage($h, 0x020A, $wParam, $lParam)
+            $res = [IntPtr]::Zero
+            $null = [DshWin32]::SendMessageTimeout($h, 0x020A, $wParam, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
             $result.method = 'wm_mousewheel'
             $result.message = "Scrolled $dir x$amount via WM_MOUSEWHEEL to hwnd $($h.ToInt64())"
           } else {
