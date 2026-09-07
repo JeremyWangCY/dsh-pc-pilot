@@ -1,4 +1,4 @@
-# dsh-computer-use bundle patch: one host row over the web profile.
+# dsh-pc-pilot bundle patch: one host row over the web profile.
 - insert:
     - id: computer-use
-      name: dsh-computer-use
+      name: dsh-pc-pilot
