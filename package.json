@@ -3,6 +3,9 @@
   "version": "0.1.0-beta.1",
   "description": "PC-Pilot - Windows computer-use host plugin for DeepSeek Harness: UIA accessibility tree, PrintWindow screenshots, background synthetic-cursor input (UIA patterns / window messages) and real SendInput, with a codex-style on-screen cursor indicator.",
   "type": "module",
+  "scripts": {
+    "test": "node test/split-text.check.mjs && node test/native-fixes.check.mjs"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
