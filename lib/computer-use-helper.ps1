@@ -63,6 +63,10 @@ public static class DshWin32
   [StructLayout(LayoutKind.Sequential)]
   public struct INPUT { public uint type; public INPUTUNION u; }
 
+  public const uint SMTO_ABORTIFHUNG = 0x0002;
+
+  [DllImport("user32.dll", SetLastError = true)] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
@@ -80,8 +84,36 @@ public static class DshWin32
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
   [DllImport("user32.dll")] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
-  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+
+  static DshWin32()
+  {
+    InitDpiAwareness();
+  }
+
+  public static void InitDpiAwareness()
+  {
+    try
+    {
+      if (!SetProcessDpiAwarenessContext((IntPtr)(-4)))
+      {
+        SetProcessDPIAware();
+      }
+    }
+    catch
+    {
+      try { SetProcessDPIAware(); } catch { }
+    }
+  }
+
+  public static IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+  {
+    IntPtr res;
+    SendMessageTimeout(hWnd, msg, wParam, lParam, SMTO_ABORTIFHUNG, 3000, out res);
+    return res;
+  }
 
   public static List<WinInfo> EnumWindowsList()
   {
@@ -273,6 +305,8 @@ public static class DshWin32
 }
 '@
 
+[DshWin32]::InitDpiAwareness()
+
 # ---------------------------------------------------------------- payload / window helpers
 
 function Get-PayloadValue {
@@ -313,7 +347,7 @@ function Resolve-TargetWindow {
     $pidMatch = [uint32]$App
     $cand = Filter-Candidates @($wins | Where-Object { $_.Pid -eq $pidMatch })
   } else {
-    $cand = Filter-Candidates @($wins | Where-Object { $_.Title -like "*$App*" })
+    $cand = Filter-Candidates @($wins | Where-Object { $_.Title -and ($_.Title.IndexOf($App, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) })
     if ($cand.Count -eq 0) {
       $names = @{}
       foreach ($w in $wins) {
@@ -499,15 +533,16 @@ function Find-ValuePatternEl {
 
 function Send-BackgroundText {
   param([IntPtr]$Hwnd, [string]$Text)
+  $res = [IntPtr]::Zero
   foreach ($ch in $Text.ToCharArray()) {
     if ($ch -eq [char]10) {
-      $null = [DshWin32]::SendMessage($Hwnd, 0x0100, [IntPtr]13, [IntPtr]::Zero)
-      $null = [DshWin32]::SendMessage($Hwnd, 0x0102, [IntPtr]13, [IntPtr]::Zero)
-      $null = [DshWin32]::SendMessage($Hwnd, 0x0101, [IntPtr]13, [IntPtr]::Zero)
+      $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0100, [IntPtr]13, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+      $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0102, [IntPtr]13, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+      $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0101, [IntPtr]13, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
       continue
     }
     if ($ch -eq [char]13) { continue }
-    $null = [DshWin32]::SendMessage($Hwnd, 0x0102, [IntPtr][int]$ch, [IntPtr]::Zero)
+    $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0102, [IntPtr][int]$ch, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
     Start-Sleep -Milliseconds 4
   }
 }
@@ -526,10 +561,11 @@ function Send-BackgroundKey {
       elseif ($m -in @('win','meta','super')) { $modVks += 0x5B }
     }
   }
-  foreach ($mvk in $modVks) { $null = [DshWin32]::SendMessage($Hwnd, 0x0100, [IntPtr]$mvk, [IntPtr]::Zero) }
-  $null = [DshWin32]::SendMessage($Hwnd, 0x0100, [IntPtr]$vk, [IntPtr]::Zero)
-  $null = [DshWin32]::SendMessage($Hwnd, 0x0101, [IntPtr]$vk, [IntPtr]::Zero)
-  for ($i = $modVks.Count - 1; $i -ge 0; $i--) { $null = [DshWin32]::SendMessage($Hwnd, 0x0101, [IntPtr]$modVks[$i], [IntPtr]::Zero) }
+  $res = [IntPtr]::Zero
+  foreach ($mvk in $modVks) { $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0100, [IntPtr]$mvk, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res) }
+  $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0100, [IntPtr]$vk, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+  $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0101, [IntPtr]$vk, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+  for ($i = $modVks.Count - 1; $i -ge 0; $i--) { $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0101, [IntPtr]$modVks[$i], [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res) }
 }
 
 function Get-UiaParent {
@@ -594,8 +630,43 @@ function Do-AppState {
     Get-ChildItem $dir -Filter 'shot-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
     $black = $false
     if ($ok -and $w -gt 4 -and $h -gt 4) {
-      $px = $bmp.GetPixel([int]($w / 2), [int]($h / 2))
-      if ($px.R -eq 0 -and $px.G -eq 0 -and $px.B -eq 0) { $black = $true }
+      $samplePoints = @(
+        @{ X = [int]($w * 0.5);  Y = [int]($h * 0.5) },
+        @{ X = [int]($w * 0.25); Y = [int]($h * 0.25) },
+        @{ X = [int]($w * 0.75); Y = [int]($h * 0.25) },
+        @{ X = [int]($w * 0.25); Y = [int]($h * 0.75) },
+        @{ X = [int]($w * 0.75); Y = [int]($h * 0.75) }
+      )
+      $allBlack = $true
+      foreach ($pt in $samplePoints) {
+        $px = $bmp.GetPixel($pt.X, $pt.Y)
+        if ($px.R -ne 0 -or $px.G -ne 0 -or $px.B -ne 0) {
+          $allBlack = $false
+          break
+        }
+      }
+      if ($allBlack) {
+        $borderTitlePoints = @(
+          @{ X = [int]($w * 0.5);  Y = [Math]::Min($h - 1, 10) },
+          @{ X = [int]($w * 0.25); Y = [Math]::Min($h - 1, 10) },
+          @{ X = [int]($w * 0.75); Y = [Math]::Min($h - 1, 10) },
+          @{ X = [Math]::Max(0, $w - 15); Y = [Math]::Min($h - 1, 10) },
+          @{ X = [Math]::Min($w - 1, 5); Y = [int]($h * 0.5) },
+          @{ X = [Math]::Max(0, $w - 5); Y = [int]($h * 0.5) },
+          @{ X = [int]($w * 0.5);  Y = [Math]::Max(0, $h - 5) }
+        )
+        $hasBorderOrTitle = $false
+        foreach ($pt in $borderTitlePoints) {
+          $px = $bmp.GetPixel($pt.X, $pt.Y)
+          if ($px.R -ne 0 -or $px.G -ne 0 -or $px.B -ne 0) {
+            $hasBorderOrTitle = $true
+            break
+          }
+        }
+        if (-not $hasBorderOrTitle) {
+          $black = $true
+        }
+      }
     }
     $bmp.Dispose()
     if ($ok) {
@@ -904,20 +975,22 @@ try {
             }
           }
         }
-        $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
-        for ($i = 0; $i -lt 16 -and $null -ne $el; $i++) {
-          $rvp = $null
-          if ($el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rvp)) {
-            for ($n = 0; $n -lt $amount; $n++) { if ($down) { $rvp.SmallIncrement() } else { $rvp.SmallDecrement() } }
-            $result.method = 'range_value'; $done = $true; break
+        if (-not $done) {
+          $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+          for ($i = 0; $i -lt 16 -and $null -ne $el; $i++) {
+            $rvp = $null
+            if ($el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rvp)) {
+              for ($n = 0; $n -lt $amount; $n++) { if ($down) { $rvp.SmallIncrement() } else { $rvp.SmallDecrement() } }
+              $result.method = 'range_value'; $done = $true; break
+            }
+            $scp = $null
+            if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
+              $none = [System.Windows.Automation.ScrollAmount]::NoAmount
+              for ($n = 0; $n -lt $amount; $n++) { if ($down) { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
+              $result.method = 'scroll_pattern'; $done = $true; break
+            }
+            $el = Get-UiaParent $el
           }
-          $scp = $null
-          if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
-            $none = [System.Windows.Automation.ScrollAmount]::NoAmount
-            for ($n = 0; $n -lt $amount; $n++) { if ($down) { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
-            $result.method = 'scroll_pattern'; $done = $true; break
-          }
-          $el = Get-UiaParent $el
         }
         if (-not $done) {
           $h = [IntPtr]::Zero
