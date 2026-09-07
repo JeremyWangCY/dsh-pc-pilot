@@ -172,7 +172,9 @@ $r2 = Split-AppCommand -Name '"C:\\Program Files\\App\\app.exe" --flag "some arg
 if ($r2[0] -ne 'C:\\Program Files\\App\\app.exe') { exit 12 }
 if ($r2[1].Count -ne 2 -or $r2[1][0] -ne '--flag' -or $r2[1][1] -ne 'some arg') { exit 13 }
 $r3 = Split-AppCommand -Name 'notepad'
-if ($r3[0] -ne 'notepad') { exit 14 }
+# bare name resolves to the real PATH location (Start-Process fails on bare names);
+# falls back to the literal name only when the exe cannot be found on PATH
+if ($r3[0] -notmatch 'notepad(\.exe)?') { exit 14 }
 if ($r3[1].Count -ne 0) { exit 15 }
 $dir = Join-Path $env:TEMP ('dsh-openapp-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $dir -Force

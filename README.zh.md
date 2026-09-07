@@ -21,20 +21,24 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 单工具全桌面 | `list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` 十个动作覆盖日常桌面操作 |
+| 单工具全桌面（25 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait` |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
+| 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
+| 丰富鼠标词汇 | 左 / 右 / 中键，双击（`click_count: 2`）、三击（`click_count: 3`），水平滚动（`direction: "left" / "right"`） |
+| O(1) 元素拾取 | `get_app_state` 在常驻 helper 守护进程内缓存 UIA 元素列表，`click_element` / `set_value` / `perform_action` / `select_text`（以及带 `element` 定向的 `type`）直接 O(1) 命中，不再二次整树遍历 |
+| 韧性截图链 | 先 `PrintWindow`，黑帧（DirectComposition / UWP 窗口）自动降级屏幕 DC `CopyFromScreen` 兜底；被遮挡窗口渲染自身内容而非遮挡物 |
 | 按任务判断 dispatch | `foreground`（真实 SendInput）作为逃生舱口；工具指引要求模型保持 background 默认、切换时明确说明、不静默循环重试 |
 | 虚拟光标指示器 | `UpdateLayeredWindow` + `CreateDIBSection` 逐像素透明分层窗口：黑描边圆润白箭头 + 柔和蓝色径向光晕；`WS_EX_TRANSPARENT` 点击穿透、`WS_EX_NOACTIVATE` + `SW_SHOWNOACTIVATE` 永不抢焦点、置顶显示 |
 | 3 秒自动隐藏 | 最后一个动作 3 秒后光标自动消失（即 AI 本轮输出结束光标随之关闭），下一个动作再出现 |
 | 高 DPI 精确落点 | overlay 启动即调 `SetProcessDPIAware`，以物理像素定位，与 UIA 上报的物理坐标一致；100% / 125% / 150% 缩放下均准确 |
-| 逐窗口截图 | 基于 `PrintWindow` 的捕获，随 `get_app_state { screenshot: true }` 返回 PNG 路径 |
-| 零依赖零配置 | 唯一外部导入是 DSH 官方运行时自带的 `@deepseek-ai/dsh-tools`；无守护进程、无驱动、无需管理员权限 |
+| 双运行时兼容 | helper 恒以 PowerShell 5.1 运行（系统内置）；PowerShell 7 (Core) 下 overlay 渲染自动补齐 `System.Private.Windows.GdiPlus` / `System.Private.Windows.Core` 引用，两个运行时渲染一致 |
+| 零依赖零配置 | 唯一外部导入是 DSH 官方运行时自带的 `@deepseek-ai/dsh-tools`；无驱动、无需管理员权限 |
 
 ## 环境要求
 
 - **操作系统**：Windows 10 或 Windows 11
 - **宿主**：DeepSeek Harness（DSH），`web` profile 中加载 `dsh-pc-pilot` bundle
-- **运行时**：Node.js ≥ 22.12（DSH 自带）与 PowerShell 5.1（Windows 系统内置）
+- **运行时**：Node.js ≥ 22.12（DSH 自带）与 PowerShell 5.1（Windows 系统内置）或 PowerShell 7+（Core，可选）
 
 ## 安装
 
@@ -90,20 +94,25 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 // 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_app_state 有效）
 ```
 
-### 动作参考
+### 动作参考（25 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
-| `list_apps` | 列出运行中的应用（pid、窗口标题、hwnd、rect） | 无 |
-| `get_app_state` | 构建目标窗口的索引化无障碍树，可选截图；应用支持时会附带 `document_text` | `app`、`screenshot` |
-| `click_element` | 点击无障碍树中的某个元素（后台 Invoke/命中） | `app`、`element` |
-| `click` | 在窗口局部坐标（带 `app`）或屏幕坐标（不带）点击 | `app`?、`x`、`y` |
-| `set_value` | 直接设置元素的文本值（走 UIA ValuePattern，比逐字输入快且稳） | `app`、`element`、`value` |
-| `type` | 通过 Unicode 输入法逐字输入文本 | `app`?、`text` |
-| `key` | 按键（Return、Escape、Tab、F1-F24、a-z、标点等） | `app`?、`key`、`modifiers`（ctrl,shift,alt,win 逗号分隔） |
-| `scroll` | 滚轮滚动 | `app`?、`x`、`y`、`amount`（默认 3）、`direction`（down/up） |
-| `drag` | 拖拽（部分场景需要 foreground） | `app`?、`from_x`、`from_y`、`to_x`、`to_y` |
-| `open_app` | 按名称启动应用 | `name` |
+| `list_apps` / `list_windows` / `list_displays` | 列出运行中的应用 / 单应用多窗口 / 显示器拓扑 | 无 / `app`? / 无 |
+| `get_app_state` | 构建目标窗口的索引化无障碍树，可选截图；应用支持时附带 `document_text` | `app`、`screenshot` |
+| `click` / `click_element` | 坐标或元素点击；支持左 / 右 / 中键与双击 / 三击 | `app`?、`x`、`y`、`button`、`click_count` |
+| `set_value` | 直接设置元素文本值（UIA ValuePattern） | `app`、`element`、`value` |
+| `type` | 逐字输入文本；可指定 `element` 定向投递 | `app`?、`text`、`element`? |
+| `perform_action` | 对元素执行命名 UIA 动作（invoke / toggle / select / expand / collapse / focus / scroll_*） | `app`、`element`、`perform` |
+| `select_text` | 选中元素文本范围（TextPattern）；`length: 0` 仅定位光标 | `app`、`element`、`start`、`length` |
+| `key` / `hold_key` | 按键 / 定时按住 | `app`?、`key`、`modifiers`、`duration_ms` |
+| `scroll` | 垂直与水平滚动 | `app`?、`x`、`y`、`amount`、`direction`（down/up/left/right） |
+| `mouse_move` / `mouse_down` / `mouse_up` | 原始鼠标原语（悬停 / 按下 / 抬起） | `app`?、`x`、`y`、`button` |
+| `drag` | 拖拽（后台走 TransformPattern，前台真实 SendInput） | `app`?、`from_x`、`from_y`、`to_x`、`to_y` |
+| `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |
+| `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
+| `open_app` / `wait` | 启动应用 / 动作间等待 | `name` / `duration_s` |
+| `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
 
 > `app` 可以是 pid 数字、进程名或窗口标题子串；一个进程有多个窗口时用 `window_index`（1 起）消歧。
 
@@ -164,8 +173,8 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 | 光标指示器不出现 | 同上查诊断日志；确认没有第二个旧版 overlay 进程残留（可在任务管理器搜 powershell） |
 | 光标可见但位置偏移 | 安装版本必须调用 `SetProcessDPIAware`（≥ 0.1.0 均有）；DPI 感知不匹配会使位置按缩放系数偏移（如 125% 下偏 25%） |
 | 桌面图标消失 / 出现灰色方块 | Windows shell（WorkerW）故障，通常由桌面整理或壁纸类工具触发，**与本插件无关**（本插件从不触碰 Progman/WorkerW）；重启 `explorer.exe` 即可恢复 |
-| 返回 `background_unavailable` | 目标没有后台路径（画布、部分 WinUI/Chromium 表面、真实拖拽）。按任务判断是否切 `foreground` |
-| 截图黑屏/空白 | DirectComposition/UWP 窗口或最小化窗口；以 `screenshot.error` 为准，改用无障碍树操作 |
+| 返回 `background_unavailable` | 目标没有后台路径（画布、部分 WinUI/Chromium 表面、真实拖拽）。按任务判断是否切 `foreground`；指定 `app` 时元素/坐标点击会自动降级为目标窗口 WM 投递（遮挡免疫），仅无边框/离屏元素才真正失败 |
+| 截图黑屏/空白 | 两级链路已兜底：`PrintWindow` 黑帧自动降级屏幕 DC 拷贝；仅两级均空（全遮挡或最小化）才报错，以 `screenshot.error` 为准 |
 
 ## 开发
 

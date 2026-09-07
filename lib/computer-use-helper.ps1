@@ -5,7 +5,8 @@
 #   cannot run in background return background_unavailable (caller may retry with
 #   dispatch=foreground = real SendInput).
 # Actions: list_apps, get_app_state, click, click_element, set_value, type, key,
-#   scroll, drag, open_app. Usage: powershell -NoProfile -ExecutionPolicy Bypass
+#   scroll, drag, open_app, mouse_move, perform_action, select_text, screenshot,
+#   zoom, switch_display, cursor_position, list_windows, wait. Usage: powershell -NoProfile -ExecutionPolicy Bypass
 #   -File <this> -Action <action> -PayloadStdin (or -PayloadJson "<json>"); writes ONE JSON doc to stdout.
 param(
   [string]$Action,
@@ -291,11 +292,27 @@ public static class DshWin32
 
   public static void MouseClick(int x, int y)
   {
+    MouseClickEx(x, y, 1, "left");
+  }
+
+  // multi-click aware click (double/triple + any button): N quick down/up pairs
+  // within the system double-click time so apps register them as 2/3-click sequences
+  public static void MouseClickEx(int x, int y, int count, string button)
+  {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(50);
-    INPUT[] d = new INPUT[] { MkMouse(0x0002, 0) };
-    INPUT[] u = new INPUT[] { MkMouse(0x0004, 0) };
-    SendInput(1, d, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(30);
-    SendInput(1, u, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(30);
+    uint downF = 0x0002, upF = 0x0004;
+    string b = (button ?? "left").Trim().ToLowerInvariant();
+    if (b == "right") { downF = 0x0008; upF = 0x0010; }
+    else if (b == "middle") { downF = 0x0020; upF = 0x0040; }
+    if (count < 1) count = 1;
+    if (count > 3) count = 3;
+    for (int i = 0; i < count; i++)
+    {
+      INPUT[] d = new INPUT[] { MkMouse(downF, 0) };
+      INPUT[] u = new INPUT[] { MkMouse(upF, 0) };
+      SendInput(1, d, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(25);
+      SendInput(1, u, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(25);
+    }
   }
 
   public static void Scroll(int x, int y, int amount, bool down)
@@ -303,6 +320,15 @@ public static class DshWin32
     SetCursorPos(x, y); System.Threading.Thread.Sleep(50);
     uint data = (uint)((down ? -1 : 1) * amount * 120);
     INPUT[] ev = new INPUT[] { MkMouse(0x0800, data) };
+    SendInput(1, ev, Marshal.SizeOf(typeof(INPUT)));
+  }
+
+  // horizontal wheel (WM_MOUSEHWHEEL equivalent): positive delta = scroll right
+  public static void ScrollH(int x, int y, int amount, bool right)
+  {
+    SetCursorPos(x, y); System.Threading.Thread.Sleep(50);
+    uint data = (uint)((right ? 1 : -1) * amount * 120);
+    INPUT[] ev = new INPUT[] { MkMouse(0x1000, data) };
     SendInput(1, ev, Marshal.SizeOf(typeof(INPUT)));
   }
 
@@ -403,34 +429,42 @@ function Get-OverlayEnabled {
   return [bool]$o
 }
 
-function Resolve-TargetWindow {
-  param([string]$App, [int]$Index)
+function Get-CandidateWindows {
+  # Shared candidate filtering for Resolve-TargetWindow and list_windows:
+  # matches pid / window-title substring / process name, drops off-screen ghosts.
+  param([string]$App)
   $wins = @([DshWin32]::EnumWindowsList())
+  $filtered = $wins
 
-  function Filter-Candidates([object[]]$list) {
-    return @($list | Where-Object {
-      $_.Rect.Left -ge -10000 -and $_.Rect.Top -ge -10000 -and
-      ($_.Rect.Right - $_.Rect.Left) -ge 50 -and
-      ($_.Rect.Bottom - $_.Rect.Top) -ge 32
-    })
-  }
-
-  if ($App -match '^\d+$') {
-    $pidMatch = [uint32]$App
-    $cand = Filter-Candidates @($wins | Where-Object { $_.Pid -eq $pidMatch })
-  } else {
-    $cand = Filter-Candidates @($wins | Where-Object { $_.Title -and ($_.Title.IndexOf($App, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) })
-    if ($cand.Count -eq 0) {
-      $names = @{}
-      foreach ($w in $wins) {
-        if (-not $names.ContainsKey($w.Pid)) {
-          $p = Get-Process -Id $w.Pid -ErrorAction SilentlyContinue
-          $names[$w.Pid] = if ($p) { $p.ProcessName } else { '' }
+  if ($App) {
+    if ($App -match '^\d+$') {
+      $pidMatch = [uint32]$App
+      $filtered = @($wins | Where-Object { $_.Pid -eq $pidMatch })
+    } else {
+      $filtered = @($wins | Where-Object { $_.Title -and ($_.Title.IndexOf($App, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) })
+      if ($filtered.Count -eq 0) {
+        $names = @{}
+        foreach ($w in $wins) {
+          if (-not $names.ContainsKey($w.Pid)) {
+            $p = Get-Process -Id $w.Pid -ErrorAction SilentlyContinue
+            $names[$w.Pid] = if ($p) { $p.ProcessName } else { '' }
+          }
         }
+        $filtered = @($wins | Where-Object { $names[$_.Pid] -ieq $App })
       }
-      $cand = Filter-Candidates @($wins | Where-Object { $names[$_.Pid] -ieq $App })
     }
   }
+
+  return @($filtered | Where-Object {
+    $_.Rect.Left -ge -10000 -and $_.Rect.Top -ge -10000 -and
+    ($_.Rect.Right - $_.Rect.Left) -ge 50 -and
+    ($_.Rect.Bottom - $_.Rect.Top) -ge 32
+  })
+}
+
+function Resolve-TargetWindow {
+  param([string]$App, [int]$Index)
+  $cand = Get-CandidateWindows -App $App
   if ($cand.Count -eq 0) { throw "app_not_found: $App" }
   if ($Index -gt 0) {
     $idx = [Math]::Min($Index, $cand.Count) - 1
@@ -467,6 +501,8 @@ function Safe-Int {
 
 function Get-AccessibilityTree {
   param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS)
+  $script:cachedTreeHwnd = $Hwnd
+  $script:cachedElements = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
   $aeRoot = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
   $children = $aeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   $out = New-Object System.Collections.Generic.List[object]
@@ -474,6 +510,7 @@ function Get-AccessibilityTree {
   foreach ($el in $children) {
     if ($count -ge $MaxElements) { break }
     $count++
+    $script:cachedElements.Add($el)
     $cur = $el.Current
     $rect = $cur.BoundingRectangle
     $name = $cur.Name
@@ -505,6 +542,13 @@ function Get-AccessibilityTree {
 
 function Find-ElementByIndex {
   param([IntPtr]$Hwnd, [int]$Index)
+  if ($script:cachedTreeHwnd -eq $Hwnd -and $null -ne $script:cachedElements -and $Index -ge 1 -and $Index -le $script:cachedElements.Count) {
+    $cached = $script:cachedElements[$Index - 1]
+    try {
+      $null = $cached.Current.ProcessId
+      return $cached
+    } catch { }
+  }
   $aeRoot = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
   $children = $aeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   $n = 0
@@ -738,6 +782,44 @@ function Get-UiaParent {
   return [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($el)
 }
 
+function Send-BackgroundMouseButton {
+  # Standard Windows click message sequence to a specific hwnd, screen coords:
+  #   single: DOWN, UP
+  #   double: DOWN, UP, DBLCLK, UP
+  #   triple: DOWN, UP, DBLCLK, UP, DBLCLK, UP
+  # (apps with CS_DBLCLKS decode the DBLCLK messages; non-double-click apps just
+  # see multiple plain clicks)
+  param([IntPtr]$Hwnd, [int]$Sx, [int]$Sy, [string]$Button, [int]$Count)
+  $msgDown = 0x0201; $msgUp = 0x0202; $msgDbl = 0x0203; $wDown = 0x0001
+  if ($Button -eq 'right') { $msgDown = 0x0204; $msgUp = 0x0205; $msgDbl = 0x0206; $wDown = 0x0002 }
+  elseif ($Button -eq 'middle') { $msgDown = 0x0207; $msgUp = 0x0208; $msgDbl = 0x0209; $wDown = 0x0010 }
+  $cpt = [DshWin32]::ScreenToClientPoint($Hwnd, $Sx, $Sy)
+  $lParam = [IntPtr](($cpt.Y -band 0xFFFF) -shl 16 -bor ($cpt.X -band 0xFFFF))
+  $res = [IntPtr]::Zero
+  $null = [DshWin32]::SendMessageTimeout($Hwnd, $msgDown, [IntPtr]$wDown, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+  $null = [DshWin32]::SendMessageTimeout($Hwnd, $msgUp, [IntPtr]::Zero, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+  for ($i = 1; $i -lt $Count; $i++) {
+    $null = [DshWin32]::SendMessageTimeout($Hwnd, $msgDbl, [IntPtr]$wDown, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+    $null = [DshWin32]::SendMessageTimeout($Hwnd, $msgUp, [IntPtr]::Zero, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+  }
+}
+
+function Find-BackgroundHwndAt {
+  # hwnd that owns the point: UIA FromPoint ancestor walk, then target window, then raw WindowFromPoint
+  param([double]$Sx, [double]$Sy, $Win)
+  $pt = New-Object System.Windows.Point($Sx, $Sy)
+  $wEl = $null
+  try { $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt) } catch { }
+  for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
+    $nh = $wEl.Current.NativeWindowHandle
+    if ($nh -ne 0) { return [IntPtr]$nh }
+    $wEl = Get-UiaParent $wEl
+  }
+  if ($null -ne $Win -and $Win.Hwnd -ne [IntPtr]::Zero) { return $Win.Hwnd }
+  $p = New-Object DshWin32+POINT; $p.X = [int]$Sx; $p.Y = [int]$Sy
+  return [DshWin32]::WindowFromPoint($p)
+}
+
 function Invoke-FromPoint {
   param([double]$X, [double]$Y)
   $pt = New-Object System.Windows.Point($X, $Y)
@@ -760,11 +842,140 @@ function Invoke-FromPoint {
   return @{ ok = $false }
 }
 
+function Find-TargetHitsAt {
+  # One shared scan over the TARGET window's own UIA tree for a screen point:
+  #   best        — smallest element containing the point (any element)
+  #   bestPattern — smallest element containing the point that carries an action
+  #                 pattern (invoke/toggle/selection), plus that method's name
+  # BoundingRectangle containment is half-open [X, X+W) x [Y, Y+H).
+  # ponytail: capped at $script:MAX_ELEMENTS — huge Chromium trees stop paying after that
+  param([IntPtr]$Hwnd, [double]$X, [double]$Y)
+  $hits = @{ best = $null; bestPattern = $null; method = $null }
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $children = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $bestArea = -1.0
+    $patArea = -1.0
+    $count = 0
+    foreach ($el in $children) {
+      if ($count -ge $script:MAX_ELEMENTS) { break }
+      $count++
+      $r = $el.Current.BoundingRectangle
+      if ($r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) { continue }
+      if ($X -lt $r.X -or $X -ge ($r.X + $r.Width) -or $Y -lt $r.Y -or $Y -ge ($r.Y + $r.Height)) { continue }
+      $area = $r.Width * $r.Height
+      if ($null -eq $hits.best -or $area -lt $bestArea) { $bestArea = $area; $hits.best = $el }
+      $method = $null
+      $ip = $null
+      if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) { $method = 'invoke' }
+      else {
+        $tp = $null
+        if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tp)) { $method = 'toggle' }
+        else {
+          $sp = $null
+          if ($el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$sp)) { $method = 'selection' }
+        }
+      }
+      if ($null -ne $method) {
+        if ($null -eq $hits.bestPattern -or $area -lt $patArea) { $patArea = $area; $hits.bestPattern = $el; $hits.method = $method }
+      }
+    }
+  } catch { }
+  return $hits
+}
+
+function Invoke-FromPointInWindow {
+  # Window-scoped semantic hit: fire the action pattern of the TARGET window's own
+  # UIA tree element under the screen point. Occlusion semantics: with a specified
+  # app, background clicks aim at the target window's tree — physical occlusion by
+  # other windows does not affect delivery, and UIA pattern hits still take priority
+  # over bare WM messages. Among matching elements the SMALLEST rectangle wins
+  # (deepest control, mirroring Invoke-FromPoint's bottom-up walk). Same return
+  # shape as Invoke-FromPoint.
+  param([IntPtr]$Hwnd, [double]$X, [double]$Y)
+  try {
+    $best = (Find-TargetHitsAt -Hwnd $Hwnd -X $X -Y $Y).bestPattern
+    if ($null -ne $best) {
+      $method = $null
+      $bp = $null
+      if ($best.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$bp)) { $method = 'invoke' }
+      elseif ($best.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$bp)) { $method = 'toggle' }
+      elseif ($best.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$bp)) { $method = 'selection' }
+      if ($method -eq 'invoke') { $bp.Invoke() }
+      elseif ($method -eq 'toggle') { $bp.Toggle() }
+      elseif ($method -eq 'selection') { $bp.Select() }
+      return @{ ok = $true; method = $method; name = $best.Current.Name; rect = $best.Current.BoundingRectangle }
+    }
+  } catch { }
+  return @{ ok = $false }
+}
+
+function Find-TargetHwndAt {
+  # hwnd that owns the point INSIDE the target window's UIA tree: find the deepest
+  # element containing the screen point, then climb to a NativeWindowHandle. NEVER
+  # falls back to screen WindowFromPoint — with a specified app that would be the
+  # occluding window; falls back to $Win.Hwnd itself. Callers must ScreenToClient
+  # against the RETURNED hwnd (Send-BackgroundMouseButton already does).
+  param([IntPtr]$Hwnd, [double]$X, [double]$Y, $Win)
+  $found = [IntPtr]::Zero
+  try {
+    $hits = Find-TargetHitsAt -Hwnd $Hwnd -X $X -Y $Y
+    $curr = $hits.best
+    $root = $null
+    if ($null -eq $curr) { $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd); $curr = $root }
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $hops = 0
+    # max-hop guard against cyclic/deep UIA trees (same style as Test-ElementInWindow)
+    while ($curr -and $hops -lt 32) {
+      $nh = $curr.Current.NativeWindowHandle
+      if ($nh -ne 0) { $found = [IntPtr]$nh; break }
+      $curr = $walker.GetParent($curr)
+      $hops++
+    }
+  } catch { }
+  if ($found -ne [IntPtr]::Zero) { return $found }
+  if ($null -ne $Win -and $Win.Hwnd -ne [IntPtr]::Zero) { return $Win.Hwnd }
+  return [IntPtr]::Zero
+}
+
 function Get-OverlayPoint-WindowCenter {
   param($Win)
   $cx = [int](($Win.Rect.Left + $Win.Rect.Right) / 2)
   $cy = [int](($Win.Rect.Top + $Win.Rect.Bottom) / 2)
   return @($cx, $cy)
+}
+
+function Test-BitmapBlank {
+  # True when the sampled quadrant points AND the border/title points are all pure
+  # black — the PrintWindow / screen-DC signature of DirectComposition/UWP/
+  # hardware-accelerated frames. Small bitmaps (<= 4px) are never flagged.
+  param($bmp, [int]$w, [int]$h)
+  if ($w -le 4 -or $h -le 4) { return $false }
+  $samplePoints = @(
+    @{ X = [int]($w * 0.5);  Y = [int]($h * 0.5) },
+    @{ X = [int]($w * 0.25); Y = [int]($h * 0.25) },
+    @{ X = [int]($w * 0.75); Y = [int]($h * 0.25) },
+    @{ X = [int]($w * 0.25); Y = [int]($h * 0.75) },
+    @{ X = [int]($w * 0.75); Y = [int]($h * 0.75) }
+  )
+  foreach ($pt in $samplePoints) {
+    $px = $bmp.GetPixel($pt.X, $pt.Y)
+    if ($px.R -ne 0 -or $px.G -ne 0 -or $px.B -ne 0) { return $false }
+  }
+  $borderTitlePoints = @(
+    @{ X = [int]($w * 0.5);  Y = [Math]::Min($h - 1, 10) },
+    @{ X = [int]($w * 0.25); Y = [Math]::Min($h - 1, 10) },
+    @{ X = [int]($w * 0.75); Y = [Math]::Min($h - 1, 10) },
+    @{ X = [Math]::Max(0, $w - 15); Y = [Math]::Min($h - 1, 10) },
+    @{ X = [Math]::Min($w - 1, 5); Y = [int]($h * 0.5) },
+    @{ X = [Math]::Max(0, $w - 5); Y = [int]($h * 0.5) },
+    @{ X = [int]($w * 0.5);  Y = [Math]::Max(0, $h - 5) }
+  )
+  foreach ($pt in $borderTitlePoints) {
+    $px = $bmp.GetPixel($pt.X, $pt.Y)
+    if ($px.R -ne 0 -or $px.G -ne 0 -or $px.B -ne 0) { return $false }
+  }
+  return $true
 }
 
 function Do-AppState {
@@ -783,6 +994,8 @@ function Do-AppState {
     $path = Join-Path $dir ("shot-{0}.png" -f ([guid]::NewGuid().ToString('N')))
     $w = $win.Rect.Right - $win.Rect.Left
     $h = $win.Rect.Bottom - $win.Rect.Top
+    # tier 1: PrintWindow (PW_RENDERFULLCONTENT) — works for background windows, but
+    # DirectComposition/UWP/hardware-accelerated targets can return pure black frames
     $bmp = New-Object System.Drawing.Bitmap([Math]::Max(1, $w), [Math]::Max(1, $h))
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $hdc = $g.GetHdc()
@@ -793,47 +1006,11 @@ function Do-AppState {
     # ponytail: GUID shot files are unbounded — keep newest 50, self-prunes the backlog too
     Get-ChildItem $dir -Filter 'shot-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
     $black = $false
-    if ($ok -and $w -gt 4 -and $h -gt 4) {
-      $samplePoints = @(
-        @{ X = [int]($w * 0.5);  Y = [int]($h * 0.5) },
-        @{ X = [int]($w * 0.25); Y = [int]($h * 0.25) },
-        @{ X = [int]($w * 0.75); Y = [int]($h * 0.25) },
-        @{ X = [int]($w * 0.25); Y = [int]($h * 0.75) },
-        @{ X = [int]($w * 0.75); Y = [int]($h * 0.75) }
-      )
-      $allBlack = $true
-      foreach ($pt in $samplePoints) {
-        $px = $bmp.GetPixel($pt.X, $pt.Y)
-        if ($px.R -ne 0 -or $px.G -ne 0 -or $px.B -ne 0) {
-          $allBlack = $false
-          break
-        }
-      }
-      if ($allBlack) {
-        $borderTitlePoints = @(
-          @{ X = [int]($w * 0.5);  Y = [Math]::Min($h - 1, 10) },
-          @{ X = [int]($w * 0.25); Y = [Math]::Min($h - 1, 10) },
-          @{ X = [int]($w * 0.75); Y = [Math]::Min($h - 1, 10) },
-          @{ X = [Math]::Max(0, $w - 15); Y = [Math]::Min($h - 1, 10) },
-          @{ X = [Math]::Min($w - 1, 5); Y = [int]($h * 0.5) },
-          @{ X = [Math]::Max(0, $w - 5); Y = [int]($h * 0.5) },
-          @{ X = [int]($w * 0.5);  Y = [Math]::Max(0, $h - 5) }
-        )
-        $hasBorderOrTitle = $false
-        foreach ($pt in $borderTitlePoints) {
-          $px = $bmp.GetPixel($pt.X, $pt.Y)
-          if ($px.R -ne 0 -or $px.G -ne 0 -or $px.B -ne 0) {
-            $hasBorderOrTitle = $true
-            break
-          }
-        }
-        if (-not $hasBorderOrTitle) {
-          $black = $true
-        }
-      }
-    }
+    if ($ok) { $black = Test-BitmapBlank $bmp $w $h }
     $bmp.Dispose()
-    if ($ok) {
+    $minimized = [DshWin32]::IsIconic($win.Hwnd)
+    if ($ok -and -not $black) {
+      # tier 1 rendered real content (implicit method = print_window)
       $shot = @{
         path = $path
         width = $w
@@ -841,10 +1018,41 @@ function Do-AppState {
         scale = 1
         window_rect = @{ x = $win.Rect.Left; y = $win.Rect.Top }
       }
-      if ($black) { $shot.error = 'print_window_black (DirectComposition/UWP target; screenshot unreliable - use dispatch=foreground for a full render)' }
-      if ([DshWin32]::IsIconic($win.Hwnd)) { $shot.error = 'window_minimized; screenshot is blank' }
+      if ($minimized) { $shot.error = 'window_minimized; screenshot is blank' }
+    } elseif (-not $minimized) {
+      # tier 2: screen-DC BitBlt of the window rect (same technique as the screenshot action).
+      # ponytail: ceiling — BitBlt captures whatever is VISIBLE in that rect right now, so a
+      # fully occluded window snapshots its occluder (never blank unless the desktop itself is);
+      # a WGC (Windows.Graphics.Capture) bypass is the follow-up upgrade path (already on the
+      # handoff list).
+      $bmp2 = New-Object System.Drawing.Bitmap([Math]::Max(1, $w), [Math]::Max(1, $h))
+      $g2 = [System.Drawing.Graphics]::FromImage($bmp2)
+      $g2.CopyFromScreen($win.Rect.Left, $win.Rect.Top, 0, 0, (New-Object System.Drawing.Size([Math]::Max(1, $w), [Math]::Max(1, $h))))
+      $g2.Dispose()
+      $bmp2.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+      $black2 = Test-BitmapBlank $bmp2 $w $h
+      $bmp2.Dispose()
+      $shot = @{
+        path = $path
+        width = $w
+        height = $h
+        scale = 1
+        window_rect = @{ x = $win.Rect.Left; y = $win.Rect.Top }
+        method = 'bitblt_screen'
+      }
+      if ($black2) {
+        $shot.error = 'screenshot_black: print_window and bitblt_screen both produced blank frames (DirectComposition/UWP/hardware-accelerated or fully occluded target); use dispatch=foreground for a full render'
+      }
     } else {
-      $shot = @{ path = $null; width = 0; height = 0; scale = 1; error = 'print_window_failed' }
+      # both tiers unavailable: minimized window (PrintWindow output is blank by definition)
+      $shot = @{
+        path = if ($ok) { $path } else { $null }
+        width = if ($ok) { $w } else { 0 }
+        height = if ($ok) { $h } else { 0 }
+        scale = 1
+        window_rect = @{ x = $win.Rect.Left; y = $win.Rect.Top }
+        error = 'window_minimized; screenshot is blank'
+      }
     }
   }
   $tree = Get-AccessibilityTree $win.Hwnd
@@ -901,6 +1109,15 @@ function Split-AppCommand {
         break
       }
     }
+  }
+  # bare executable name without a path/extension: Start-Process fails on this machine's
+  # restricted lookup ("system cannot find all information required") — resolve the real
+  # path on PATH and retry with the .exe suffix so `open_app { name: "notepad" }` works
+  if (-not (Test-Path $filePath) -and $filePath -notmatch '[\\/\.]') {
+    try {
+      $resolved = (Get-Command -Name "$filePath.exe" -ErrorAction Stop).Source
+      if ($resolved) { $filePath = $resolved }
+    } catch { }
   }
   return @($filePath, $argList)
 }
@@ -1050,19 +1267,24 @@ function Invoke-MouseButtonAction {
   Notify-Cursor -X $sx -Y $sy -Label ($Action + ' ' + $button)
 
   if ($dispatch -eq 'background') {
-    $pt = New-Object System.Windows.Point($sx, $sy)
     $h = [IntPtr]::Zero
-    $wEl = $null
-    try { $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt) } catch { }
-    for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
-      $nh = $wEl.Current.NativeWindowHandle
-      if ($nh -ne 0) { $h = [IntPtr]$nh; break }
-      $wEl = Get-UiaParent $wEl
-    }
-    if ($h -eq [IntPtr]::Zero -and $win) { $h = $win.Hwnd }
-    if ($h -eq [IntPtr]::Zero) {
-      $p = New-Object DshWin32+POINT; $p.X = $sx; $p.Y = $sy
-      $h = [DshWin32]::WindowFromPoint($p)
+    if ($win) {
+      # app-scoped: target-window tree lookup — occluding windows can never intercept
+      # the delivery (old code preferred the screen-level hwnd, i.e. the occluder)
+      $h = Find-TargetHwndAt -Hwnd $win.Hwnd -X $sx -Y $sy -Win $win
+    } else {
+      $pt = New-Object System.Windows.Point($sx, $sy)
+      $wEl = $null
+      try { $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt) } catch { }
+      for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
+        $nh = $wEl.Current.NativeWindowHandle
+        if ($nh -ne 0) { $h = [IntPtr]$nh; break }
+        $wEl = Get-UiaParent $wEl
+      }
+      if ($h -eq [IntPtr]::Zero) {
+        $p = New-Object DshWin32+POINT; $p.X = $sx; $p.Y = $sy
+        $h = [DshWin32]::WindowFromPoint($p)
+      }
     }
     if ($h -ne [IntPtr]::Zero) {
       $msg = 0
@@ -1148,12 +1370,26 @@ function Invoke-ActionRequest {
       $result.note = $st.note
       $result.dispatch = (Get-Dispatch)
       $result.message = "State captured for '$app' ($($st.element_count) elements)"
+      if ($st.screenshot -and $st.screenshot.error) { $result.message += ' [' + $st.screenshot.error + ']' }
     }
 
     'click' {
       $app = Get-PayloadValue 'app'
       $x = [int](Get-PayloadValue 'x')
       $y = [int](Get-PayloadValue 'y')
+      $button = Get-PayloadValue 'button'
+      if (-not $button) { $button = 'left' }
+      $button = ([string]$button).ToLowerInvariant()
+      if ($button -notin @('left', 'right', 'middle')) {
+        throw "invalid mouse button: $button (expected 'left', 'right', or 'middle')"
+      }
+      $clickCount = 1
+      $rawCount = Get-PayloadValue 'click_count'
+      if ($null -ne $rawCount) {
+        $clickCount = [int]$rawCount
+        if ($clickCount -lt 1) { $clickCount = 1 }
+        if ($clickCount -gt 3) { $clickCount = 3 }
+      }
       $dispatch = Get-Dispatch
       $win = $null
       if ($app) {
@@ -1165,21 +1401,68 @@ function Invoke-ActionRequest {
       } else {
         $sx = $x; $sy = $y
       }
+      $label = 'click'
+      if ($clickCount -eq 2) { $label = 'double-click' }
+      elseif ($clickCount -eq 3) { $label = 'triple-click' }
+      if ($button -ne 'left') { $label = "$button $label" }
       if ($dispatch -eq 'background') {
-        Notify-Cursor -X $sx -Y $sy -Label 'click'
-        $hit = Invoke-FromPoint -X $sx -Y $sy
-        if ($hit.ok) {
-          $result.method = 'uia_hit_' + $hit.method
-          $result.hit_name = $hit.name
-          $result.message = "Background click at ($sx, $sy) -> $($hit.method) on '$($hit.name)'"
+        Notify-Cursor -X $sx -Y $sy -Label $label
+        if ($button -eq 'left' -and $clickCount -eq 1) {
+          if ($win) {
+            # app-scoped: aim at the TARGET window's own tree — physical occlusion by
+            # other windows does not affect delivery; UIA pattern hits still take
+            # priority over bare WM messages
+            $hit = Invoke-FromPointInWindow -Hwnd $win.Hwnd -X $sx -Y $sy
+            if ($hit.ok) {
+              $result.method = 'uia_window_hit_' + $hit.method
+              $result.hit_name = $hit.name
+              $result.message = "Background click at ($sx, $sy) -> $($hit.method) on '$($hit.name)' (target-window tree; occlusion-immune)"
+            } else {
+              # no actionable pattern at that point: deliver a plain WM click sequence
+              # to the target window's own hwnd (stronger than the old
+              # background_unavailable — clicks still land inside the app)
+              $h = Find-TargetHwndAt -Hwnd $win.Hwnd -X $sx -Y $sy -Win $win
+              Send-BackgroundMouseButton -Hwnd $h -Sx $sx -Sy $sy -Button 'left' -Count 1
+              $result.method = 'wm_message'
+              $result.target_hwnd = $h.ToInt64()
+              $result.message = "Background click at ($sx, $sy): no invokable control in the target window tree; WM click delivered via the target-window path to hwnd $($h.ToInt64()) (occlusion-immune)"
+            }
+          } else {
+            # global click (no app): screen-level semantics unchanged
+            $hit = Invoke-FromPoint -X $sx -Y $sy
+            if ($hit.ok) {
+              $result.method = 'uia_hit_' + $hit.method
+              $result.hit_name = $hit.name
+              $result.message = "Background click at ($sx, $sy) -> $($hit.method) on '$($hit.name)'"
+            } else {
+              $result.background_unavailable = $true
+              $result.message = "Background click at ($sx, $sy): no invokable/toggle/selectable control at that point (canvas or coordinate-text click). Use dispatch=foreground for a real click, or click_element with an element index."
+            }
+          }
         } else {
-          $result.background_unavailable = $true
-          $result.message = "Background click at ($sx, $sy): no invokable/toggle/selectable control at that point (canvas or coordinate-text click). Use dispatch=foreground for a real click, or click_element with an element index."
+          # right/middle clicks and multi-clicks: standard WM click sequence;
+          # app-scoped lookups must never hit the screen-level occluder
+          if ($win) {
+            $h = Find-TargetHwndAt -Hwnd $win.Hwnd -X $sx -Y $sy -Win $win
+          } else {
+            $h = Find-BackgroundHwndAt -Sx $sx -Sy $sy -Win $win
+          }
+          if ($h -ne [IntPtr]::Zero) {
+            Send-BackgroundMouseButton -Hwnd $h -Sx $sx -Sy $sy -Button $button -Count $clickCount
+            $result.method = 'wm_message'
+            $result.target_hwnd = $h.ToInt64()
+            $result.message = "Background $label sent via window message to hwnd $($h.ToInt64()) at ($sx, $sy)"
+          } else {
+            $result.background_unavailable = $true
+            $result.message = "Background $label at ($sx, $sy): no target window found at that point. Use dispatch=foreground."
+          }
         }
         $result.clicked = @{ x = $sx; y = $sy }
       } else {
-        [DshWin32]::MouseClick($sx, $sy)
-        $result.message = "Clicked at screen ($sx, $sy)"
+        [DshWin32]::MouseClickEx($sx, $sy, $clickCount, $button)
+        $result.button = $button
+        $result.click_count = $clickCount
+        $result.message = "$label at screen ($sx, $sy)"
         $result.clicked = @{ x = $sx; y = $sy }
       }
     }
@@ -1222,9 +1505,19 @@ function Invoke-ActionRequest {
               $exp.Expand(); $result.method = 'expand_pattern'; $result.message = "Expanded element $element"
             } elseif ($dispatch -eq 'background') {
               $r = $el.Current.BoundingRectangle
-              $result.background_unavailable = $true
-              $result.element_rect = @{ x = (Safe-Int $r.X); y = (Safe-Int $r.Y); width = (Safe-Int $r.Width); height = (Safe-Int $r.Height) }
-              $result.message = "Element $element has no UIA action pattern (Invoke/Toggle/Selection/ExpandCollapse); background click unavailable. Use dispatch=foreground."
+              if ($r.Width -gt 0 -and $r.Height -gt 0) {
+                $cx = (Safe-Int ($r.X + $r.Width / 2)); $cy = (Safe-Int ($r.Y + $r.Height / 2))
+                $h = Find-TargetHwndAt -Hwnd $win.Hwnd -X $cx -Y $cy -Win $win
+                Send-BackgroundMouseButton -Hwnd $h -Sx $cx -Sy $cy -Button 'left' -Count 1
+                $result.method = 'wm_message'
+                $result.target_hwnd = $h.ToInt64()
+                $result.clicked = @{ x = $cx; y = $cy }
+                $result.message = "Clicked element $element via target-window WM message to hwnd $($h.ToInt64()) at ($cx, $cy) (no UIA pattern; occlusion-immune)"
+              } else {
+                $result.background_unavailable = $true
+                $result.element_rect = @{ x = (Safe-Int $r.X); y = (Safe-Int $r.Y); width = (Safe-Int $r.Width); height = (Safe-Int $r.Height) }
+                $result.message = "Element $element has no UIA action pattern (Invoke/Toggle/Selection/ExpandCollapse) and invalid bounding rectangle; background click unavailable. Use dispatch=foreground."
+              }
             } else {
               $pt = New-Object System.Windows.Point
               $clickable = $el.TryGetClickablePoint([ref]$pt)
@@ -1295,7 +1588,16 @@ function Invoke-ActionRequest {
         $pt = Get-OverlayPoint-WindowCenter $win
         $cx = $pt[0]; $cy = $pt[1]
         if ($dispatch -eq 'background') {
-          $h = Find-TextInputHwnd $win.Hwnd
+          $h = [IntPtr]::Zero
+          $rawElement = Get-PayloadValue 'element'
+          if ($null -ne $rawElement) {
+            # explicit element target: when it maps to a native HWND, WM_CHAR goes
+            # straight there (skips Find-TextInputHwnd); otherwise fall through
+            $tel = Find-ElementByIndex -Hwnd $win.Hwnd -Index ([int]$rawElement)
+            $tnh = $tel.Current.NativeWindowHandle
+            if ($tnh -ne 0) { $h = [IntPtr]$tnh }
+          }
+          if ($h -eq [IntPtr]::Zero) { $h = Find-TextInputHwnd $win.Hwnd }
           if ($h -eq [IntPtr]::Zero) {
             # fallback: apps with no native edit HWND (WinUI/Chromium) -> ValuePattern.SetValue
             $vel = Find-ValuePatternEl $win.Hwnd
@@ -1366,6 +1668,8 @@ function Invoke-ActionRequest {
       $dir = Get-PayloadValue 'direction'
       if (-not $dir) { $dir = 'down' }
       $down = ($dir -ne 'up')
+      $horizontal = ($dir -eq 'left' -or $dir -eq 'right')
+      $right = ($dir -eq 'right')
       $dispatch = Get-Dispatch
       $win = $null
       if ($app) {
@@ -1379,67 +1683,112 @@ function Invoke-ActionRequest {
       if ($dispatch -eq 'background') {
         Notify-Cursor -X $sx -Y $sy -Label ('scroll ' + $dir)
         $pt = New-Object System.Windows.Point($sx, $sy)
-        $done = $false
-        # Primary: hit the TARGET window's own document via FromHandle - immune to window occlusion
-        if ($win) {
-          $winEl = $null
-          try { $winEl = [System.Windows.Automation.AutomationElement]::FromHandle($win.Hwnd) } catch { $winEl = $null }
-          if ($winEl) {
-            $docCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
-            $doc = $winEl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $docCond)
-            $dscp = $null
-            if ($doc -and $doc.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$dscp)) {
-              $none = [System.Windows.Automation.ScrollAmount]::NoAmount
-              for ($n = 0; $n -lt $amount; $n++) { if ($down) { $dscp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $dscp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
-              $result.method = 'scroll_pattern'; $done = $true
-              $result.message = "Scrolled $dir x$amount via ScrollPattern on target window document"
-            }
-          }
-        }
-        if (-not $done) {
+        if ($horizontal) {
+          # horizontal scroll: ScrollPattern (horizontal axis) first, then WM_MOUSEHWHEEL
+          # (0x020E, wParam delta positive = scroll right); same hwnd fallback logic as vertical
+          $done = $false
           $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
           for ($i = 0; $i -lt 16 -and $null -ne $el; $i++) {
-            $rvp = $null
-            if ($el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rvp)) {
-              for ($n = 0; $n -lt $amount; $n++) { if ($down) { $rvp.SmallIncrement() } else { $rvp.SmallDecrement() } }
-              $result.method = 'range_value'; $done = $true; break
-            }
             $scp = $null
             if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
               $none = [System.Windows.Automation.ScrollAmount]::NoAmount
-              for ($n = 0; $n -lt $amount; $n++) { if ($down) { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
+              for ($n = 0; $n -lt $amount; $n++) { if ($right) { $scp.Scroll([System.Windows.Automation.ScrollAmount]::LargeIncrement, $none) } else { $scp.Scroll([System.Windows.Automation.ScrollAmount]::LargeDecrement, $none) } }
               $result.method = 'scroll_pattern'; $done = $true; break
             }
             $el = Get-UiaParent $el
           }
-        }
-        if (-not $done) {
-          $h = [IntPtr]::Zero
-          $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
-          for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
-            $nh = $wEl.Current.NativeWindowHandle
-            if ($nh -ne 0) { $h = [IntPtr]$nh; break }
-            $wEl = Get-UiaParent $wEl
-          }
-          if ($h -eq [IntPtr]::Zero -and $win) { $h = $win.Hwnd }
-          if ($h -ne [IntPtr]::Zero) {
-            $delta = $amount * 120
-            if ($down) { $delta = -$delta }
-            $wParam = [IntPtr]($delta -shl 16)
-            $lParam = [IntPtr](($sy -band 0xFFFF) -shl 16 -bor ($sx -band 0xFFFF))
-            $res = [IntPtr]::Zero
-            $null = [DshWin32]::SendMessageTimeout($h, 0x020A, $wParam, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
-            $result.method = 'wm_mousewheel'
-            $result.message = "Scrolled $dir x$amount via WM_MOUSEWHEEL to hwnd $($h.ToInt64())"
+          if (-not $done) {
+            $h = [IntPtr]::Zero
+            $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+            for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
+              $nh = $wEl.Current.NativeWindowHandle
+              if ($nh -ne 0) { $h = [IntPtr]$nh; break }
+              $wEl = Get-UiaParent $wEl
+            }
+            if ($h -eq [IntPtr]::Zero -and $win) { $h = $win.Hwnd }
+            if ($h -ne [IntPtr]::Zero) {
+              $delta = $amount * 120
+              if (-not $right) { $delta = -$delta }
+              $wParam = [IntPtr]($delta -shl 16)
+              $lParam = [IntPtr](($sy -band 0xFFFF) -shl 16 -bor ($sx -band 0xFFFF))
+              $res = [IntPtr]::Zero
+              $null = [DshWin32]::SendMessageTimeout($h, 0x020E, $wParam, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+              $result.method = 'wm_mousehwheel'
+              $result.message = "Scrolled $dir x$amount via WM_MOUSEHWHEEL to hwnd $($h.ToInt64())"
+            } else {
+              $result.background_unavailable = $true
+              $result.message = 'scroll: no window under the point; nothing to scroll'
+            }
           } else {
-            $result.background_unavailable = $true
-            $result.message = 'scroll: no window under the point; nothing to scroll'
+            $result.message = "Scrolled $dir x$amount via $($result.method)"
           }
         } else {
-          $result.message = "Scrolled $dir x$amount via $($result.method)"
+          $done = $false
+          # Primary: hit the TARGET window's own document via FromHandle - immune to window occlusion
+          if ($win) {
+            $winEl = $null
+            try { $winEl = [System.Windows.Automation.AutomationElement]::FromHandle($win.Hwnd) } catch { $winEl = $null }
+            if ($winEl) {
+              $docCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
+              $doc = $winEl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $docCond)
+              $dscp = $null
+              if ($doc -and $doc.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$dscp)) {
+                $none = [System.Windows.Automation.ScrollAmount]::NoAmount
+                for ($n = 0; $n -lt $amount; $n++) { if ($down) { $dscp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $dscp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
+                $result.method = 'scroll_pattern'; $done = $true
+                $result.message = "Scrolled $dir x$amount via ScrollPattern on target window document"
+              }
+            }
+          }
+          if (-not $done) {
+            $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+            for ($i = 0; $i -lt 16 -and $null -ne $el; $i++) {
+              $rvp = $null
+              if ($el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rvp)) {
+                for ($n = 0; $n -lt $amount; $n++) { if ($down) { $rvp.SmallIncrement() } else { $rvp.SmallDecrement() } }
+                $result.method = 'range_value'; $done = $true; break
+              }
+              $scp = $null
+              if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
+                $none = [System.Windows.Automation.ScrollAmount]::NoAmount
+                for ($n = 0; $n -lt $amount; $n++) { if ($down) { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
+                $result.method = 'scroll_pattern'; $done = $true; break
+              }
+              $el = Get-UiaParent $el
+            }
+          }
+          if (-not $done) {
+            $h = [IntPtr]::Zero
+            $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+            for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
+              $nh = $wEl.Current.NativeWindowHandle
+              if ($nh -ne 0) { $h = [IntPtr]$nh; break }
+              $wEl = Get-UiaParent $wEl
+            }
+            if ($h -eq [IntPtr]::Zero -and $win) { $h = $win.Hwnd }
+            if ($h -ne [IntPtr]::Zero) {
+              $delta = $amount * 120
+              if ($down) { $delta = -$delta }
+              $wParam = [IntPtr]($delta -shl 16)
+              $lParam = [IntPtr](($sy -band 0xFFFF) -shl 16 -bor ($sx -band 0xFFFF))
+              $res = [IntPtr]::Zero
+              $null = [DshWin32]::SendMessageTimeout($h, 0x020A, $wParam, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+              $result.method = 'wm_mousewheel'
+              $result.message = "Scrolled $dir x$amount via WM_MOUSEWHEEL to hwnd $($h.ToInt64())"
+            } else {
+              $result.background_unavailable = $true
+              $result.message = 'scroll: no window under the point; nothing to scroll'
+            }
+          } else {
+            $result.message = "Scrolled $dir x$amount via $($result.method)"
+          }
         }
       } else {
-        [DshWin32]::Scroll($sx, $sy, $amount, $down)
+        if ($horizontal) {
+          [DshWin32]::ScrollH($sx, $sy, $amount, $right)
+        } else {
+          [DshWin32]::Scroll($sx, $sy, $amount, $down)
+        }
         $result.message = "Scrolled $dir x$amount at ($sx, $sy)"
       }
     }
@@ -1603,6 +1952,326 @@ function Invoke-ActionRequest {
       }
       $result.message = "Started $filePath ($($argList.Count) argument(s)) (focus restored to your previous window; operated in background)"
       $result.pid = $proc.Id
+    }
+
+    'mouse_move' {
+      $app = Get-PayloadValue 'app'
+      $x = [int](Get-PayloadValue 'x')
+      $y = [int](Get-PayloadValue 'y')
+      $dispatch = Get-Dispatch
+      $win = $null
+      if ($app) {
+        $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+        $sx = $win.Rect.Left + $x; $sy = $win.Rect.Top + $y
+      } else {
+        $sx = $x; $sy = $y
+      }
+      if ($dispatch -eq 'background') {
+        # synthetic cursor only: the user's real mouse is never moved in background
+        Notify-Cursor -X $sx -Y $sy -Label 'move'
+        $result.method = 'overlay_cursor'
+        $result.position = @{ x = $sx; y = $sy }
+        $result.message = "mouse_move: synthetic cursor shown at ($sx, $sy); the real mouse was NOT moved (use dispatch=foreground to move it)"
+      } else {
+        [DshWin32]::MouseMove($sx, $sy)
+        $result.method = 'send_input'
+        $result.position = @{ x = $sx; y = $sy }
+        $result.message = "Moved the real mouse cursor to ($sx, $sy)"
+      }
+    }
+
+    'list_windows' {
+      $app = Get-PayloadValue 'app'
+      $cand = Get-CandidateWindows -App ([string]$app)
+      $infos = @()
+      foreach ($w in $cand) { $infos += (Get-WindowInfo $w) }
+      $result.windows = $infos
+      $result.window_count = $cand.Count
+      if ($app) {
+        $result.message = "Found $($cand.Count) window(s) matching '$app'"
+      } else {
+        $result.message = "Found $($cand.Count) window(s)"
+      }
+    }
+
+    'cursor_position' {
+      $cur = [System.Windows.Forms.Cursor]::Position
+      $px = [int]$cur.X; $py = [int]$cur.Y
+      $screens = [System.Windows.Forms.Screen]::AllScreens
+      $dispIdx = 0
+      for ($i = 0; $i -lt $screens.Length; $i++) {
+        $b = $screens[$i].Bounds
+        if ($px -ge $b.X -and $px -lt ($b.X + $b.Width) -and $py -ge $b.Y -and $py -lt ($b.Y + $b.Height)) {
+          $dispIdx = $i + 1
+          break
+        }
+      }
+      if ($dispIdx -eq 0) { $dispIdx = 1 }
+      $result.position = @{ x = $px; y = $py }
+      $result.display = $dispIdx
+      $result.primary = [bool]$screens[$dispIdx - 1].Primary
+      $result.message = "Cursor at ($px, $py) on display $dispIdx"
+    }
+
+    'wait' {
+      $rawDur = Get-PayloadValue 'duration_s'
+      $dur = if ($null -eq $rawDur) { 1 } else { [double]$rawDur }
+      if ($dur -lt 0) { $dur = 0 }
+      if ($dur -gt 30) { $dur = 30 }
+      # Start-Sleep -Seconds is int-typed in PS 5.1 — use Milliseconds so fractional durations work
+      Start-Sleep -Milliseconds ([int]($dur * 1000))
+      $result.duration_s = $dur
+      $result.message = "Waited $dur second(s)"
+    }
+
+    'screenshot' {
+      $dir = Join-Path $env:TEMP 'dsh-cua'
+      if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+      $screens = [System.Windows.Forms.Screen]::AllScreens
+      $disp = [int](Get-PayloadValue 'display')
+      if ($disp -le 0) {
+        # fall back to the display.state file written by switch_display, then the primary
+        $stateFile = Join-Path $dir 'display.state'
+        if (Test-Path $stateFile) {
+          try { $disp = [int]((Get-Content $stateFile -Raw).Trim()) } catch { $disp = 0 }
+        }
+      }
+      if ($disp -le 0) { $disp = 1 }
+      if ($disp -gt $screens.Length) { throw "display index out of range: $disp (1..$($screens.Length))" }
+      $bounds = $screens[$disp - 1].Bounds
+      $rx = [int]$bounds.X; $ry = [int]$bounds.Y
+      $rw = [int]$bounds.Width; $rh = [int]$bounds.Height
+      $rawX = Get-PayloadValue 'x'
+      $rawY = Get-PayloadValue 'y'
+      $rawW = Get-PayloadValue 'width'
+      $rawH = Get-PayloadValue 'height'
+      if ($null -ne $rawX) { $rx = [int]$rawX }
+      if ($null -ne $rawY) { $ry = [int]$rawY }
+      if ($null -ne $rawW) { $rw = [int]$rawW }
+      if ($null -ne $rawH) { $rh = [int]$rawH }
+      # intersect the requested region with the display bounds and clamp
+      $ix = [Math]::Max($rx, $bounds.X)
+      $iy = [Math]::Max($ry, $bounds.Y)
+      $ir = [Math]::Min($rx + $rw, $bounds.X + $bounds.Width)
+      $ib = [Math]::Min($ry + $rh, $bounds.Y + $bounds.Height)
+      $iw = $ir - $ix; $ih = $ib - $iy
+      if ($iw -lt 1 -or $ih -lt 1) { throw "screenshot: requested region does not intersect display $disp bounds" }
+      $bmp = New-Object System.Drawing.Bitmap($iw, $ih)
+      $g = [System.Drawing.Graphics]::FromImage($bmp)
+      $g.CopyFromScreen($ix, $iy, 0, 0, (New-Object System.Drawing.Size($iw, $ih)))
+      $g.Dispose()
+      $path = Join-Path $dir ("disp-{0}.png" -f ([guid]::NewGuid().ToString('N')))
+      $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+      $bmp.Dispose()
+      # ponytail: GUID disp files are unbounded — keep newest 50, same policy as shot-*.png
+      Get-ChildItem $dir -Filter 'disp-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
+      $result.path = $path
+      $result.width = $iw
+      $result.height = $ih
+      $result.rect = @{ x = $ix; y = $iy; width = $iw; height = $ih }
+      $result.display = $disp
+      $result.message = "Screenshot of display $disp captured ($iw x $ih) at screen ($ix, $iy)"
+    }
+
+    'switch_display' {
+      $screens = [System.Windows.Forms.Screen]::AllScreens
+      $disp = [int](Get-PayloadValue 'display')
+      if ($disp -lt 1 -or $disp -gt $screens.Length) { throw "display index out of range: $disp (1..$($screens.Length))" }
+      $dir = Join-Path $env:TEMP 'dsh-cua'
+      if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+      Set-Content -Path (Join-Path $dir 'display.state') -Value ([string]$disp) -Encoding ascii
+      $b = $screens[$disp - 1].Bounds
+      $result.display = $disp
+      $result.bounds = @{ x = [int]$b.X; y = [int]$b.Y; width = [int]$b.Width; height = [int]$b.Height }
+      $result.message = "Active display set to $disp ($($b.Width) x $($b.Height) at ($($b.X), $($b.Y))); screenshots default to it until changed"
+    }
+
+    'zoom' {
+      $dir = Join-Path $env:TEMP 'dsh-cua'
+      $srcPath = [string](Get-PayloadValue 'path')
+      if (-not $srcPath) {
+        # default source: newest shot-*.png or disp-*.png in %TEMP%\dsh-cua
+        $cands = @(Get-ChildItem $dir -Filter '*.png' -ea SilentlyContinue | Where-Object { $_.Name -like 'shot-*.png' -or $_.Name -like 'disp-*.png' } | Sort-Object LastWriteTime -Descending)
+        if ($cands.Count -eq 0) { throw 'zoom: no source screenshot; run get_app_state or screenshot first' }
+        $srcPath = $cands[0].FullName
+      }
+      if (-not (Test-Path $srcPath)) { throw "zoom: source screenshot not found: $srcPath" }
+      $rx = Safe-Int (Get-PayloadValue 'x')
+      $ry = Safe-Int (Get-PayloadValue 'y')
+      $rw = Safe-Int (Get-PayloadValue 'width')
+      $rh = Safe-Int (Get-PayloadValue 'height')
+      if ($rw -le 0 -or $rh -le 0) { throw 'zoom: width and height are required (crop size in pixels of the source image)' }
+      $src = New-Object System.Drawing.Bitmap($srcPath)
+      $sw = $src.Width; $sh = $src.Height
+      # clamp the crop region into the source image; width/height stay >= 1
+      $ix = [Math]::Max(0, [Math]::Min($rx, $sw - 1))
+      $iy = [Math]::Max(0, [Math]::Min($ry, $sh - 1))
+      $iw = [Math]::Max(1, [Math]::Min($rw, $sw - $ix))
+      $ih = [Math]::Max(1, [Math]::Min($rh, $sh - $iy))
+      $rect = New-Object System.Drawing.Rectangle($ix, $iy, $iw, $ih)
+      $crop = $src.Clone($rect, $src.PixelFormat)
+      $src.Dispose()
+      if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+      $outPath = Join-Path $dir ("zoom-{0}.png" -f ([guid]::NewGuid().ToString('N')))
+      $crop.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
+      $crop.Dispose()
+      # ponytail: GUID zoom files are unbounded — keep newest 50
+      Get-ChildItem $dir -Filter 'zoom-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
+      $result.path = $outPath
+      $result.width = $iw
+      $result.height = $ih
+      $result.source_path = $srcPath
+      $result.message = "Zoomed ${iw}x${ih} crop at ($ix, $iy) from $srcPath"
+    }
+
+    'perform_action' {
+      $app = Get-PayloadValue 'app'
+      $element = [int](Get-PayloadValue 'element')
+      $perform = ([string](Get-PayloadValue 'perform')).Trim().ToLowerInvariant()
+      $supportedPerforms = 'invoke, press, click, toggle, switch, select, add_to_selection, remove_from_selection, expand, collapse, focus, set_focus, scroll_up, scroll_down, scroll_left, scroll_right'
+      $dispatch = Get-Dispatch
+      $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+      if ($dispatch -eq 'foreground') {
+        [DshWin32]::ForceForeground($win.Hwnd)
+        Start-Sleep -Milliseconds 150
+        $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+      }
+      $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
+      if ($dispatch -eq 'background') {
+        $elRect = $el.Current.BoundingRectangle
+        if ($elRect.Width -gt 0 -and $elRect.Height -gt 0) {
+          Notify-Cursor -X (Safe-Int ($elRect.X + $elRect.Width / 2)) -Y (Safe-Int ($elRect.Y + $elRect.Height / 2)) -Label ('perform ' + $perform)
+        }
+      }
+      if (-not $perform) {
+        throw "perform_action requires 'perform' (supported: $supportedPerforms)"
+      }
+      if ($perform -in @('invoke', 'press', 'click')) {
+        $ip = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) {
+          throw "element $element does not support InvokePattern; cannot perform '$perform'"
+        }
+        $ip.Invoke()
+        $result.method = 'invoke_pattern'
+        $result.message = "Performed '$perform' on element $element via InvokePattern"
+      } elseif ($perform -in @('toggle', 'switch')) {
+        $tog = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tog)) {
+          throw "element $element does not support TogglePattern; cannot perform '$perform'"
+        }
+        $tog.Toggle()
+        $result.method = 'toggle_pattern'
+        $result.message = "Performed '$perform' on element $element via TogglePattern"
+      } elseif ($perform -eq 'select') {
+        $sel = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$sel)) {
+          throw "element $element does not support SelectionItemPattern; cannot perform '$perform'"
+        }
+        $sel.Select()
+        $result.method = 'selection_pattern'
+        $result.message = "Performed '$perform' on element $element via SelectionItemPattern"
+      } elseif ($perform -eq 'add_to_selection') {
+        $sel = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$sel)) {
+          throw "element $element does not support SelectionItemPattern; cannot perform '$perform'"
+        }
+        $sel.AddToSelection()
+        $result.method = 'selection_pattern'
+        $result.message = "Performed '$perform' on element $element via SelectionItemPattern"
+      } elseif ($perform -eq 'remove_from_selection') {
+        $sel = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$sel)) {
+          throw "element $element does not support SelectionItemPattern; cannot perform '$perform'"
+        }
+        $sel.RemoveFromSelection()
+        $result.method = 'selection_pattern'
+        $result.message = "Performed '$perform' on element $element via SelectionItemPattern"
+      } elseif ($perform -eq 'expand') {
+        $exp = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$exp)) {
+          throw "element $element does not support ExpandCollapsePattern; cannot perform '$perform'"
+        }
+        $exp.Expand()
+        $result.method = 'expand_pattern'
+        $result.message = "Performed '$perform' on element $element via ExpandCollapsePattern"
+      } elseif ($perform -eq 'collapse') {
+        $exp = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$exp)) {
+          throw "element $element does not support ExpandCollapsePattern; cannot perform '$perform'"
+        }
+        $exp.Collapse()
+        $result.method = 'expand_pattern'
+        $result.message = "Performed '$perform' on element $element via ExpandCollapsePattern"
+      } elseif ($perform -in @('focus', 'set_focus')) {
+        $el.SetFocus()
+        $result.method = 'set_focus'
+        $result.message = "Focused element $element"
+      } elseif ($perform -in @('scroll_up', 'scroll_down', 'scroll_left', 'scroll_right')) {
+        $scp = $null
+        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
+          throw "element $element does not support ScrollPattern; cannot perform '$perform'"
+        }
+        $none = [System.Windows.Automation.ScrollAmount]::NoAmount
+        if ($perform -eq 'scroll_up') { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) }
+        elseif ($perform -eq 'scroll_down') { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) }
+        elseif ($perform -eq 'scroll_left') { $scp.Scroll([System.Windows.Automation.ScrollAmount]::LargeDecrement, $none) }
+        else { $scp.Scroll([System.Windows.Automation.ScrollAmount]::LargeIncrement, $none) }
+        $result.method = 'scroll_pattern'
+        $result.message = "Performed '$perform' on element $element via ScrollPattern"
+      } else {
+        throw "unknown perform '$perform' (supported: $supportedPerforms)"
+      }
+    }
+
+    'select_text' {
+      $app = Get-PayloadValue 'app'
+      $element = [int](Get-PayloadValue 'element')
+      $start = [int](Get-PayloadValue 'start')
+      if ($start -lt 0) { $start = 0 }
+      $rawLen = Get-PayloadValue 'length'
+      $len = if ($null -eq $rawLen) { 0 } else { [int]$rawLen }
+      if ($len -lt 0) { $len = 0 }
+      $dispatch = Get-Dispatch
+      $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+      if ($dispatch -eq 'foreground') {
+        [DshWin32]::ForceForeground($win.Hwnd)
+        Start-Sleep -Milliseconds 150
+        $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+      }
+      $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
+      $tp = $null
+      if (-not $el.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$tp)) {
+        if ($dispatch -eq 'background') {
+          $result.background_unavailable = $true
+          $result.message = "select_text: element $element has no TextPattern; background text selection unavailable. Use dispatch=foreground."
+        } else {
+          throw "element $element does not support TextPattern; cannot select text"
+        }
+      } else {
+        $doc = $tp.DocumentRange
+        # collapse the range at the document start: pull the End endpoint all the way
+        # back (MoveEndpointByUnit clamps, endpoints never cross)
+        $null = $doc.MoveEndpointByUnit([System.Windows.Automation.TextPatternRangeEndpoint]::End, [System.Windows.Automation.TextUnit]::Character, -1000000000)
+        # advance Start to the requested offset (the range is degenerate; Move shifts it)
+        if ($start -gt 0) { $null = $doc.Move([System.Windows.Automation.TextUnit]::Character, $start) }
+        if ($len -gt 0) {
+          $null = $doc.MoveEndpointByUnit([System.Windows.Automation.TextPatternRangeEndpoint]::End, [System.Windows.Automation.TextUnit]::Character, $len)
+        }
+        $doc.Select()
+        $grab = $len + 32
+        if ($len -le 0) { $grab = 64 }
+        $selText = $doc.GetText($grab)
+        $result.method = 'text_pattern'
+        $result.selected_text = $selText
+        $result.start = $start
+        $result.length = $len
+        if ($len -gt 0) {
+          $result.message = "Selected $len char(s) from offset $start (recovered $($selText.Length))"
+          if ($selText.Length -ne $len) { $result.message += '; provider returned a different char count than requested (TextUnit semantics vary by UIA provider)' }
+        } else {
+          $result.message = "Caret placed at offset $start (length 0)"
+        }
+      }
     }
 
     default {

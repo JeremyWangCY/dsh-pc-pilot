@@ -40,7 +40,7 @@ $b64 = "dXNpbmcgU3lzdGVtOwp1c2luZyBTeXN0ZW0uRHJhd2luZzsKdXNpbmcgU3lzdGVtLkRyYXdp
 $csFile = Join-Path $dir "dsh-vc-layer.cs"
 [System.IO.File]::WriteAllText($csFile, [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64)))
 if ($PSVersionTable.PSEdition -eq 'Core') {
-  Add-Type -Path $csFile -ReferencedAssemblies "System.Drawing.Common", "System.Drawing.Primitives"
+  Add-Type -Path $csFile -ReferencedAssemblies "System.Drawing.Common", "System.Drawing.Primitives", "System.Private.Windows.GdiPlus", "System.Private.Windows.Core"
 } else {
   Add-Type -Path $csFile -ReferencedAssemblies "System.Drawing"
 }

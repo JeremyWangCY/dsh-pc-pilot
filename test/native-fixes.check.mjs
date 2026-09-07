@@ -85,6 +85,110 @@ assert.match(
   'Do-AppState must verify border / title points before flagging black'
 )
 
+// 5b. Do-AppState screenshot fallback chain: PrintWindow -> screen-DC BitBlt
+assert.match(
+  helperContent,
+  /function\s+Test-BitmapBlank/,
+  'black-frame detection must be factored into Test-BitmapBlank'
+)
+assert.match(
+  helperContent,
+  /Test-BitmapBlank[\s\S]*?CopyFromScreen\(\$win\.Rect\.Left,\s*\$win\.Rect\.Top,\s*0,\s*0,/,
+  'Do-AppState must fall back to Graphics.CopyFromScreen over the window rect when PrintWindow blanks/fails'
+)
+assert.ok(
+  helperContent.includes("'bitblt_screen'"),
+  'Do-AppState must tag the screen-DC fallback screenshot with method bitblt_screen'
+)
+// tier 2 must stay guarded (never BitBlt a minimized window — that captures whatever
+// is on screen there) and must re-check the fallback frame before declaring success
+assert.match(
+  helperContent,
+  /\} elseif \(-not \$minimized\) \{[\s\S]*?CopyFromScreen/,
+  'tier-2 BitBlt fallback must be guarded by -not $minimized'
+)
+assert.match(
+  helperContent,
+  /\$black2 = Test-BitmapBlank/,
+  'tier-2 fallback frame must be re-checked for blank before tagging success'
+)
+
+// 5c. Occlusion-immune background clicks: app-scoped clicks aim at the target window's
+// own tree, never at the screen-level (potentially occluding) topmost window
+assert.ok(
+  helperContent.includes('function Invoke-FromPointInWindow'),
+  'window-scoped semantic hit helper Invoke-FromPointInWindow must exist'
+)
+assert.ok(
+  helperContent.includes('function Find-TargetHwndAt'),
+  'target-window hwnd lookup Find-TargetHwndAt must exist'
+)
+assert.match(
+  helperContent,
+  /function\s+Find-TargetHwndAt[\s\S]*?return\s+\$Win\.Hwnd/,
+  'Find-TargetHwndAt must fall back to the target window hwnd itself (never the screen-level occluder)'
+)
+assert.match(
+  helperContent,
+  /\$h = Find-TargetHwndAt -Hwnd \$win\.Hwnd -X \$sx -Y \$sy -Win \$win/,
+  'click/mouse_down app-scoped background paths must route through Find-TargetHwndAt'
+)
+// pin BOTH call sites separately (click branch AND Invoke-MouseButtonAction) so
+// reverting either one back to the screen-level occluder lookup fails the check
+assert.match(
+  helperContent,
+  /'click' \{[\s\S]{0,4000}\$h = Find-TargetHwndAt -Hwnd \$win\.Hwnd/,
+  'the click branch must resolve app-scoped clicks via Find-TargetHwndAt'
+)
+assert.match(
+  helperContent,
+  /function Invoke-MouseButtonAction[\s\S]{0,4000}\$h = Find-TargetHwndAt -Hwnd \$win\.Hwnd/,
+  'mouse_down/mouse_up must resolve app-scoped presses via Find-TargetHwndAt'
+)
+assert.ok(
+  helperContent.includes("'uia_window_hit_'"),
+  'app-scoped semantic hits must be tagged with the uia_window_hit_ method prefix'
+)
+assert.ok(
+  helperContent.includes('function Find-TargetHitsAt'),
+  'the shared single-scan hit-test Find-TargetHitsAt must exist (no duplicate full-tree scans)'
+)
+
+// 5d. click_element background fallback: when no UIA action pattern is supported,
+// fall back to target-window WM message at element center if BoundingRectangle is valid
+assert.match(
+  helperContent,
+  /'click_element'[\s\S]*?\$h = Find-TargetHwndAt -Hwnd \$win\.Hwnd -X \$cx -Y \$cy -Win \$win[\s\S]*?Send-BackgroundMouseButton -Hwnd \$h -Sx \$cx -Sy \$cy -Button 'left' -Count 1/,
+  'click_element background path must fall back to target-window WM click when element has valid rect'
+)
+assert.ok(
+  helperContent.includes('"Clicked element $element via target-window WM message to hwnd $($h.ToInt64()) at ($cx, $cy) (no UIA pattern; occlusion-immune)"'),
+  'click_element must set descriptive message on target-window WM fallback'
+)
+
+// 5e. UIA element caching (O(1) lookup): Get-AccessibilityTree caches elements into $script:cachedElements,
+// and Find-ElementByIndex checks $script:cachedElements before falling back to full-tree scan
+assert.match(
+  helperContent,
+  /function\s+Get-AccessibilityTree[\s\S]*?\$script:cachedElements\s*=\s*New-Object System\.Collections\.Generic\.List\[System\.Windows\.Automation\.AutomationElement\]/,
+  'Get-AccessibilityTree must initialize $script:cachedElements'
+)
+assert.match(
+  helperContent,
+  /function\s+Get-AccessibilityTree[\s\S]*?\$script:cachedElements\.Add\(\$el\)/,
+  'Get-AccessibilityTree must populate $script:cachedElements during tree traversal'
+)
+assert.match(
+  helperContent,
+  /function\s+Find-ElementByIndex[\s\S]*?\$script:cachedTreeHwnd\s*-eq\s*\$Hwnd\s*-and\s*\$null\s*-ne\s*\$script:cachedElements/,
+  'Find-ElementByIndex must check $script:cachedElements for matching hwnd'
+)
+assert.match(
+  helperContent,
+  /function\s+Find-ElementByIndex[\s\S]*?\$cached\s*=\s*\$script:cachedElements\[\$Index\s*-\s*1\][\s\S]*?\$cached\.Current\.ProcessId/,
+  'Find-ElementByIndex must perform liveness check on cached element before returning'
+)
+
 // 6. virtual-cursor-overlay.ps1 fixes
 assert.ok(
   overlayContent.includes('SetProcessDpiAwarenessContext((IntPtr)(-4))'),

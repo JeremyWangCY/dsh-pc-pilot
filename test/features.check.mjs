@@ -28,7 +28,7 @@ assert.equal(params.button.type, 'string')
 assert.deepEqual(params.button.enum, ['left', 'right', 'middle'])
 assert.equal(
   params.button.description,
-  'Mouse button for mouse_down/mouse_up (default left).'
+  'Mouse button for click and mouse_down/mouse_up (default left).'
 )
 
 // duration_ms property schema

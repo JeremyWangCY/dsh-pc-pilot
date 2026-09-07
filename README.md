@@ -12,13 +12,17 @@ While acting, the model moves a small **codex-style on-screen cursor** (a rounde
 
 ## Features
 
-- **One tool, full desktop** — `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`.
+- **One tool, full desktop (25 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
+- **Occlusion-immune background clicks** — with an `app` specified, coordinate clicks aim at the target window's own UIA tree / hwnd, so a fully covered window can be operated unattended while the user keeps working on top.
+- **Rich mouse vocabulary** — left / right / middle clicks, double-click (`click_count: 2`), triple-click (`click_count: 3`), and horizontal scrolling (`direction: "left" / "right"`).
+- **O(1) element lookup** — `get_app_state` caches the UIA element list inside the persistent helper daemon, so `click_element` / `set_value` / `perform_action` / `select_text` (and `type` with an `element` target) resolve without a second full-tree traversal.
+- **Resilient screenshots** — `PrintWindow` first, then a screen-DC `CopyFromScreen` fallback when the frame comes back blank (DirectComposition / UWP windows), so occluded windows still render their own content.
 - **Per-task dispatch** — `dispatch: "foreground"` (real SendInput) exists for the cases that genuinely need it (canvas clicks, unsupported drags, apps with no background path); the tool guidance keeps background as the default and asks the model to be explicit when it goes foreground.
 - **Virtual-cursor indicator** — per-pixel-alpha layered window (`UpdateLayeredWindow` + `CreateDIBSection`): rounded white arrow with black outline over a soft blue radial glow. Click-through (`WS_EX_TRANSPARENT`), non-activating (`WS_EX_NOACTIVATE` + `SW_SHOWNOACTIVATE`), always-on-top. Auto-hides 3 s after the last action and reappears on the next one.
 - **High-DPI accurate** — the overlay calls `SetProcessDPIAware` at startup and positions itself in physical pixels, matching the physical coordinates the helper reports from UIA. Correct placement at 100% / 125% / 150% scaling.
-- **Window screenshots** — `PrintWindow`-based per-window capture saved as PNG, returned with `get_app_state { screenshot: true }`.
-- **Zero setup** — no daemons, no drivers, no admin rights. Everything runs through the Windows PowerShell 5.1 helper that ships inside the package.
+- **PowerShell 5.1 + 7 (Core) compatible** — the overlay adds the `System.Private.Windows.GdiPlus` / `System.Private.Windows.Core` references under .NET Core so both runtimes render the cursor identically.
+- **Zero setup** — no drivers, no admin rights. Everything runs through the Windows PowerShell helper that ships inside the package.
 
 ## Requirements
 
@@ -56,8 +60,25 @@ The plugin registers one global tool, `computer`. Typical flow:
 
 1. `computer { action: "list_apps" }` — running apps with pids, window titles, hwnds and rects.
 2. `computer { action: "get_app_state", app: "Notepad", screenshot: true }` — indexed accessibility tree (element index / role / name / value / automation_id / rect / invokable) plus a window screenshot.
-3. Act on the state — `click_element { app, element }`, `set_value { app, element, value }`, `type { app, text }`, `key { app, key, modifiers }`, `scroll { app, x, y, amount, direction }`, `drag { app, from_x, from_y, to_x, to_y }`.
+3. Act on the state — `click_element { app, element }`, `set_value { app, element, value }`, `type { app, text }`, `key { app, key, modifiers }`, `scroll { app, x, y, amount, direction }`, `drag { app, from_x, from_y, to_x, to_y }`, `perform_action { app, element, perform }`, `select_text { app, element, start, length }`.
 4. Refresh the state after every UI change; element indexes are only valid for the `get_app_state` that produced them.
+
+### Action reference (25 actions)
+
+| Action | Purpose |
+| --- | --- |
+| `list_apps` / `list_windows` / `list_displays` | Enumerate apps / per-app windows / display topology |
+| `get_app_state` | Indexed UIA tree + per-window PNG screenshot + document text |
+| `click` / `click_element` | Coordinate or element click (left / right / middle, `click_count` 1-3) |
+| `set_value` / `type` / `perform_action` / `select_text` | Element-level write, text entry, named UIA pattern, text-range selection |
+| `key` / `hold_key` | Key presses and timed holds with modifiers |
+| `scroll` | Vertical and horizontal scrolling (`direction: down / up / left / right`) |
+| `mouse_move` / `mouse_down` / `mouse_up` | Raw mouse primitives |
+| `drag` | Element move (background) or real SendInput drag (foreground) |
+| `screenshot` / `zoom` | Full-display or region capture; crop the latest shot |
+| `switch_display` / `cursor_position` | Default capture display; real cursor location |
+| `open_app` / `wait` | Launch an app; pause between actions |
+| `read_clipboard` / `write_clipboard` | Clipboard round-trip |
 
 ### Key parameters
 
@@ -68,6 +89,8 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `screenshot` | `true` | Capture a per-window PNG in `get_app_state`. |
 | `app` | — | pid number, process name, or window-title substring; `window_index` disambiguates multiple windows. |
 | `x` / `y` | — | Window-local pixels (with `app`) or screen coordinates (without). |
+| `button` / `click_count` | `left` / `1` | Mouse button and click repetitions for `click` (double = 2, triple = 3). |
+| `display` | primary | 1-based display index for `screenshot` / `switch_display`. |
 
 ## How it works
 
@@ -94,7 +117,7 @@ The helper is a single self-contained `computer-use-helper.ps1` copied to `%TEMP
 - **The cursor indicator does not appear** — check `%TEMP%\dsh-cua-diag.log` (boot diagnostics) and make sure the host was restarted after installation.
 - **The indicator is visible but misplaced** — ensure the installed version calls `SetProcessDPIAware` (all ≥ 0.1.0 builds do); mismatched DPI awareness shifts the overlay by the scaling factor.
 - **Desktop icons vanish / gray boxes appear** — this is a Windows shell (WorkerW) glitch typically caused by desktop-organizer or wallpaper tools, not by this plugin; restarting `explorer.exe` restores the desktop.
-- **`background_unavailable`** — the target has no background path (canvas, some WinUI/Chromium surfaces). Decide per task whether to go `foreground`.
+- **`background_unavailable`** — the target has no background path (canvas, some WinUI/Chromium surfaces). Decide per task whether to go `foreground`. With an `app` specified, element and coordinate clicks fall back to the target-window WM path (occlusion-immune) instead of failing.
 
 ## Development
 
