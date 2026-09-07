@@ -102,6 +102,14 @@ public static class DshWin32
   [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
   [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+  public static POINT ScreenToClientPoint(IntPtr hWnd, int sx, int sy)
+  {
+    POINT p = new POINT { X = sx, Y = sy };
+    ScreenToClient(hWnd, ref p);
+    return p;
+  }
 
   static DshWin32()
   {
@@ -231,6 +239,10 @@ public static class DshWin32
       case "printscreen": case "prtsc": return 0x2C;
       case "scrolllock": return 0x91;
       case "pause": case "break": return 0x13;
+      case "shift": return 0x10;
+      case "ctrl": case "control": return 0x11;
+      case "alt": return 0x12;
+      case "win": case "meta": case "super": return 0x5B;
     }
     if (k.Length == 1)
     {
@@ -310,6 +322,57 @@ public static class DshWin32
     System.Threading.Thread.Sleep(60);
     INPUT[] u = new INPUT[] { MkMouse(0x0004, 0) };
     SendInput(1, u, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(30);
+  }
+
+  public static void MouseDown(int x, int y, string button)
+  {
+    SetCursorPos(x, y); System.Threading.Thread.Sleep(30);
+    uint flag = 0x0002;
+    string b = (button ?? "left").Trim().ToLowerInvariant();
+    if (b == "right") flag = 0x0008;
+    else if (b == "middle") flag = 0x0020;
+    INPUT[] d = new INPUT[] { MkMouse(flag, 0) };
+    SendInput(1, d, Marshal.SizeOf(typeof(INPUT)));
+  }
+
+  public static void MouseUp(int x, int y, string button)
+  {
+    SetCursorPos(x, y); System.Threading.Thread.Sleep(30);
+    uint flag = 0x0004;
+    string b = (button ?? "left").Trim().ToLowerInvariant();
+    if (b == "right") flag = 0x0010;
+    else if (b == "middle") flag = 0x0040;
+    INPUT[] u = new INPUT[] { MkMouse(flag, 0) };
+    SendInput(1, u, Marshal.SizeOf(typeof(INPUT)));
+  }
+
+  public static void HoldKey(string key, string modifiers, int durationMs)
+  {
+    ushort vk = MapKey(key);
+    if (vk == 0) throw new Exception("unknown key: " + key);
+    List<ushort> mods = new List<ushort>();
+    if (!string.IsNullOrEmpty(modifiers))
+    {
+      foreach (string part in modifiers.Split(new char[] { ',', '+' }, StringSplitOptions.RemoveEmptyEntries))
+      {
+        string m = part.Trim().ToLowerInvariant();
+        if (m == "ctrl" || m == "control") mods.Add(0x11);
+        else if (m == "shift") mods.Add(0x10);
+        else if (m == "alt") mods.Add(0x12);
+        else if (m == "win" || m == "meta" || m == "super") mods.Add(0x5B);
+      }
+    }
+    List<INPUT> down = new List<INPUT>();
+    foreach (ushort m in mods) down.Add(MkKey(m, 0));
+    down.Add(MkKey(vk, 0));
+    SendInput((uint)down.Count, down.ToArray(), Marshal.SizeOf(typeof(INPUT)));
+
+    System.Threading.Thread.Sleep(durationMs);
+
+    List<INPUT> up = new List<INPUT>();
+    up.Add(MkKey(vk, 2));
+    for (int i = mods.Count - 1; i >= 0; i--) up.Add(MkKey(mods[i], 2));
+    SendInput((uint)up.Count, up.ToArray(), Marshal.SizeOf(typeof(INPUT)));
   }
 }
 '@
@@ -647,6 +710,28 @@ function Send-BackgroundKey {
   for ($i = $modVks.Count - 1; $i -ge 0; $i--) { $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0101, [IntPtr]$modVks[$i], [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res) }
 }
 
+function Send-BackgroundHoldKey {
+  param([IntPtr]$Hwnd, [string]$Key, [string]$Modifiers, [int]$DurationMs)
+  $vk = [DshWin32]::MapKey($Key)
+  if ($vk -eq 0) { throw "unknown key: $Key" }
+  $modVks = @()
+  if ($Modifiers) {
+    foreach ($part in ($Modifiers -split '[,+]')) {
+      $m = $part.Trim().ToLowerInvariant()
+      if ($m -in @('ctrl','control')) { $modVks += 0x11 }
+      elseif ($m -in @('shift')) { $modVks += 0x10 }
+      elseif ($m -in @('alt')) { $modVks += 0x12 }
+      elseif ($m -in @('win','meta','super')) { $modVks += 0x5B }
+    }
+  }
+  $res = [IntPtr]::Zero
+  foreach ($mvk in $modVks) { $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0100, [IntPtr]$mvk, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res) }
+  $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0100, [IntPtr]$vk, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+  Start-Sleep -Milliseconds $DurationMs
+  $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0101, [IntPtr]$vk, [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+  for ($i = $modVks.Count - 1; $i -ge 0; $i--) { $null = [DshWin32]::SendMessageTimeout($Hwnd, 0x0101, [IntPtr]$modVks[$i], [IntPtr]::Zero, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res) }
+}
+
 function Get-UiaParent {
   param([System.Windows.Automation.AutomationElement]$el)
   if ($null -eq $el) { return $null }
@@ -818,6 +903,199 @@ function Split-AppCommand {
     }
   }
   return @($filePath, $argList)
+}
+
+function Get-ClipboardTextSafe {
+  if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -eq [System.Threading.ApartmentState]::STA) {
+    for ($i = 0; $i -lt 10; $i++) {
+      try {
+        if ([System.Windows.Forms.Clipboard]::ContainsText()) {
+          return [System.Windows.Forms.Clipboard]::GetText()
+        }
+        return ''
+      } catch {
+        Start-Sleep -Milliseconds 50
+      }
+    }
+    return [System.Windows.Forms.Clipboard]::GetText()
+  } else {
+    $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+    $rs.ApartmentState = [System.Threading.ApartmentState]::STA
+    $rs.Open()
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    $ps.Runspace = $rs
+    $null = $ps.AddScript({
+      Add-Type -AssemblyName System.Windows.Forms
+      for ($i = 0; $i -lt 10; $i++) {
+        try {
+          if ([System.Windows.Forms.Clipboard]::ContainsText()) {
+            return [System.Windows.Forms.Clipboard]::GetText()
+          }
+          return ''
+        } catch {
+          Start-Sleep -Milliseconds 50
+        }
+      }
+      return [System.Windows.Forms.Clipboard]::GetText()
+    })
+    $out = $ps.Invoke()
+    $ps.Dispose()
+    $rs.Dispose()
+    if ($out -and $out.Count -gt 0) { return [string]$out[0] }
+    return ''
+  }
+}
+
+function Set-ClipboardTextSafe {
+  param([string]$Text)
+  if ($null -eq $Text) { $Text = '' }
+  if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -eq [System.Threading.ApartmentState]::STA) {
+    for ($i = 0; $i -lt 10; $i++) {
+      try {
+        if ($Text.Length -eq 0) {
+          [System.Windows.Forms.Clipboard]::Clear()
+        } else {
+          [System.Windows.Forms.Clipboard]::SetText($Text)
+        }
+        return
+      } catch {
+        Start-Sleep -Milliseconds 50
+      }
+    }
+    if ($Text.Length -eq 0) {
+      [System.Windows.Forms.Clipboard]::Clear()
+    } else {
+      [System.Windows.Forms.Clipboard]::SetText($Text)
+    }
+  } else {
+    $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+    $rs.ApartmentState = [System.Threading.ApartmentState]::STA
+    $rs.Open()
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    $ps.Runspace = $rs
+    $null = $ps.AddScript({
+      param($t)
+      Add-Type -AssemblyName System.Windows.Forms
+      for ($i = 0; $i -lt 10; $i++) {
+        try {
+          if ($t.Length -eq 0) {
+            [System.Windows.Forms.Clipboard]::Clear()
+          } else {
+            [System.Windows.Forms.Clipboard]::SetText($t)
+          }
+          return
+        } catch {
+          Start-Sleep -Milliseconds 50
+        }
+      }
+      if ($t.Length -eq 0) {
+        [System.Windows.Forms.Clipboard]::Clear()
+      } else {
+        [System.Windows.Forms.Clipboard]::SetText($t)
+      }
+    }).AddArgument($Text)
+    $null = $ps.Invoke()
+    $ps.Dispose()
+    $rs.Dispose()
+  }
+}
+
+function Invoke-MouseButtonAction {
+  param([bool]$IsDown, $Result)
+  $Action = if ($IsDown) { 'mouse_down' } else { 'mouse_up' }
+  $button = Get-PayloadValue 'button'
+  if (-not $button) { $button = 'left' }
+  $button = ([string]$button).ToLowerInvariant()
+  if ($button -notin @('left', 'right', 'middle')) {
+    throw "invalid mouse button: $button (expected 'left', 'right', or 'middle')"
+  }
+  $app = Get-PayloadValue 'app'
+  $rawX = Get-PayloadValue 'x'
+  $rawY = Get-PayloadValue 'y'
+  $dispatch = Get-Dispatch
+  $win = $null
+  if ($app) {
+    $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+    if ($dispatch -eq 'foreground') {
+      [DshWin32]::ForceForeground($win.Hwnd)
+      Start-Sleep -Milliseconds 150
+      $Result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+    }
+  }
+
+  if ($null -ne $rawX -and $null -ne $rawY) {
+    $x = [int]$rawX
+    $y = [int]$rawY
+    if ($win) {
+      $sx = $win.Rect.Left + $x
+      $sy = $win.Rect.Top + $y
+    } else {
+      $sx = $x
+      $sy = $y
+    }
+  } else {
+    $cur = [System.Windows.Forms.Cursor]::Position
+    $sx = [int]$cur.X
+    $sy = [int]$cur.Y
+  }
+
+  Notify-Cursor -X $sx -Y $sy -Label ($Action + ' ' + $button)
+
+  if ($dispatch -eq 'background') {
+    $pt = New-Object System.Windows.Point($sx, $sy)
+    $h = [IntPtr]::Zero
+    $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+    for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
+      $nh = $wEl.Current.NativeWindowHandle
+      if ($nh -ne 0) { $h = [IntPtr]$nh; break }
+      $wEl = Get-UiaParent $wEl
+    }
+    if ($h -eq [IntPtr]::Zero -and $win) { $h = $win.Hwnd }
+    if ($h -eq [IntPtr]::Zero) {
+      $p = New-Object DshWin32+POINT; $p.X = $sx; $p.Y = $sy
+      $h = [DshWin32]::WindowFromPoint($p)
+    }
+    if ($h -ne [IntPtr]::Zero) {
+      $msg = 0
+      $wParam = [IntPtr]::Zero
+      switch ($button) {
+        'left' {
+          if ($IsDown) { $msg = 0x0201; $wParam = [IntPtr]0x0001 }
+          else { $msg = 0x0202; $wParam = [IntPtr]0x0000 }
+        }
+        'right' {
+          if ($IsDown) { $msg = 0x0204; $wParam = [IntPtr]0x0002 }
+          else { $msg = 0x0205; $wParam = [IntPtr]0x0000 }
+        }
+        'middle' {
+          if ($IsDown) { $msg = 0x0207; $wParam = [IntPtr]0x0010 }
+          else { $msg = 0x0208; $wParam = [IntPtr]0x0000 }
+        }
+      }
+      $cpt = [DshWin32]::ScreenToClientPoint($h, $sx, $sy)
+      $lParam = [IntPtr](($cpt.Y -band 0xFFFF) -shl 16 -bor ($cpt.X -band 0xFFFF))
+      $res = [IntPtr]::Zero
+      $null = [DshWin32]::SendMessageTimeout($h, $msg, $wParam, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+      $Result.method = 'wm_message'
+      $Result.target_hwnd = $h.ToInt64()
+      $Result.button = $button
+      $Result.position = @{ x = $sx; y = $sy }
+      $Result.message = "$Action ($button) sent via window message to hwnd $($h.ToInt64()) at ($sx, $sy)"
+    } else {
+      $Result.background_unavailable = $true
+      $Result.message = "${Action}: no target window found at ($sx, $sy); use dispatch=foreground."
+    }
+  } else {
+    if ($IsDown) {
+      [DshWin32]::MouseDown($sx, $sy, $button)
+    } else {
+      [DshWin32]::MouseUp($sx, $sy, $button)
+    }
+    $Result.method = 'send_input'
+    $Result.button = $button
+    $Result.position = @{ x = $sx; y = $sy }
+    $Result.message = "$Action ($button) at screen ($sx, $sy)"
+  }
 }
 
 # ---------------------------------------------------------------- shared action dispatch
@@ -1198,6 +1476,101 @@ function Invoke-ActionRequest {
         [DshWin32]::Drag($fx, $fy, $tx, $ty)
         $result.message = "Dragged ($fx,$fy) -> ($tx,$ty)"
       }
+    }
+
+    'read_clipboard' {
+      $text = Get-ClipboardTextSafe
+      $result.text = $text
+      $result.message = "Clipboard read ($($text.Length) chars)"
+    }
+
+    'write_clipboard' {
+      $text = Get-PayloadValue 'text'
+      if ($null -eq $text) { $text = '' } else { $text = [string]$text }
+      Set-ClipboardTextSafe -Text $text
+      $len = if ($text) { $text.Length } else { 0 }
+      $result.length = $len
+      $result.message = "Clipboard updated ($len chars)"
+    }
+
+    'list_displays' {
+      $screens = [System.Windows.Forms.Screen]::AllScreens
+      $displays = @()
+      $idx = 1
+      foreach ($s in $screens) {
+        $displays += @{
+          index = $idx
+          id = [string]$s.DeviceName
+          primary = [bool]$s.Primary
+          bounds = @{
+            x = [int]$s.Bounds.X
+            y = [int]$s.Bounds.Y
+            width = [int]$s.Bounds.Width
+            height = [int]$s.Bounds.Height
+          }
+          working_area = @{
+            x = [int]$s.WorkingArea.X
+            y = [int]$s.WorkingArea.Y
+            width = [int]$s.WorkingArea.Width
+            height = [int]$s.WorkingArea.Height
+          }
+        }
+        $idx++
+      }
+      $result.display_count = $screens.Length
+      $result.displays = $displays
+      $result.message = "Found $($screens.Length) display(s)"
+    }
+
+    'mouse_down' {
+      Invoke-MouseButtonAction -IsDown $true -Result $result
+    }
+
+    'mouse_up' {
+      Invoke-MouseButtonAction -IsDown $false -Result $result
+    }
+
+    'hold_key' {
+      $app = Get-PayloadValue 'app'
+      $key = Get-PayloadValue 'key'
+      if (-not $key) { throw "hold_key requires 'key' parameter" }
+      $mods = Get-PayloadValue 'modifiers'
+      $rawDur = Get-PayloadValue 'duration_ms'
+      $dur = if ($null -eq $rawDur) { 500 } else { [int]$rawDur }
+      if ($dur -lt 50) { $dur = 50 }
+      if ($dur -gt 10000) { $dur = 10000 }
+      $dispatch = Get-Dispatch
+      $win = $null
+      if ($app) {
+        $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+        if ($dispatch -eq 'foreground') {
+          [DshWin32]::ForceForeground($win.Hwnd)
+          Start-Sleep -Milliseconds 150
+          $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+        }
+      }
+      if ($dispatch -eq 'background' -and $null -ne $win) {
+        $h = Find-TextInputHwnd $win.Hwnd
+        if ($h -eq [IntPtr]::Zero) {
+          $result.background_unavailable = $true
+          $result.message = "hold_key: no focusable control HWND in '$app' to receive WM_KEY; use dispatch=foreground."
+          break
+        }
+        $pt = Get-OverlayPoint-WindowCenter $win
+        Notify-Cursor -X $pt[0] -Y $pt[1] -Label ('hold_key ' + $key + ' ' + $dur + 'ms')
+        Send-BackgroundHoldKey -Hwnd $h -Key $key -Modifiers $mods -DurationMs $dur
+        $result.method = 'wm_key'
+        $result.key = $key
+        $result.duration_ms = $dur
+        $result.modifiers = $mods
+        $result.message = "Held $key for ${dur}ms (wm_key) to hwnd $($h.ToInt64())"
+        break
+      }
+      [DshWin32]::HoldKey($key, $mods, $dur)
+      $result.key = $key
+      $result.duration_ms = $dur
+      $result.modifiers = $mods
+      $result.message = "Held $key for ${dur}ms"
     }
 
     'open_app' {
