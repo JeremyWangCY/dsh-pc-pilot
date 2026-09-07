@@ -13,7 +13,9 @@ param(
   [switch]$PayloadStdin,
   # -Server: persistent daemon mode. One JSON request per stdin line
   # ({ id, action, ...payload fields }), one single-line JSON reply per line of
-  # stdout, 300s idle exit. Without it the one-shot PayloadStdin/PayloadJson
+  # stdout. No idle exit here: PS blocking reads cannot enforce one, so idle
+  # lifecycle is owned by the node side (300s kill timer in lib/index.js).
+  # Without -Server the one-shot PayloadStdin/PayloadJson
   # contract is unchanged (fallback path).
   [switch]$Server
 )
@@ -1239,7 +1241,7 @@ function Write-DaemonReply {
   if ($Reply -is [hashtable]) { $Reply.id = $Id }
   else { $Reply = @{ id = $Id; ok = $false; action = ''; message = 'invalid reply object' } }
   # single-line JSON, always: compress, then strip any residual newline
-  $json = ($Reply | ConvertTo-Json -Compress -Depth 8) -replace "(`r|`n)", ' '
+  $json = ($Reply | ConvertTo-Json -Compress -Depth 10) -replace "(`r|`n)", ' '
   [Console]::Out.WriteLine($json)
   [Console]::Out.Flush()
 }
@@ -1248,23 +1250,15 @@ function Write-DaemonReply {
 if ($Server) {
   # keep the JSONL stdout stream clean: silence Write-Host/information records
   $InformationPreference = 'SilentlyContinue'
-  $script:lastRequestUtc = [DateTime]::UtcNow
+  # Simple loop: blocking ReadLine -> dispatch -> reply. No idle exit here —
+  # Console.In.Peek() blocks on a redirected pipe and the old async-read poll
+  # was proven to never run the idle check (judge: helper alive at 330s), so
+  # idle lifecycle is owned by the node side instead. Exit on
+  # EOF (stdin closed by node) or process kill.
   while ($true) {
-    try {
-      # blocking line read with a 100ms poll so an idle timeout is enforceable.
-      # (Console.In.Peek() BLOCKS on a redirected pipe, so a Peek-poll would
-      # never reach the idle check; ReadLineAsync + Wait IS the read timeout.)
-      $readTask = [Console]::In.ReadLineAsync()
-      while (-not $readTask.Wait(100)) {
-        if (([DateTime]::UtcNow - $script:lastRequestUtc).TotalSeconds -ge 300) {
-          [Console]::Out.Flush()
-          exit 0
-        }
-      }
-      $line = $readTask.Result
-    } catch { break }
+    $line = $null
+    try { $line = [Console]::In.ReadLine() } catch { break }
     if ($null -eq $line) { break }   # stdin closed -> exit cleanly
-    $script:lastRequestUtc = [DateTime]::UtcNow
     $trimmed = $line.Trim()
     if ($trimmed.Length -eq 0) { continue }
     $req = $null
