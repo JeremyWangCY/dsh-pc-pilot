@@ -150,13 +150,14 @@ public static class DshWin32
     SendInput(2, esc, Marshal.SizeOf(typeof(INPUT)));
     System.Threading.Thread.Sleep(40);
     IntPtr f = GetForegroundWindow();
-    uint fgTid; GetWindowThreadProcessId(f, out fgTid);
-    uint hTid; GetWindowThreadProcessId(h, out hTid);
-    if (fgTid != hTid) AttachThreadInput(fgTid, hTid, true);
+    // GetWindowThreadProcessId RETURNS the thread id; the out param receives the process id.
+    uint fgPid; uint fgTid = GetWindowThreadProcessId(f, out fgPid);
+    uint curPid; uint curTid = GetWindowThreadProcessId(h, out curPid);
+    if (fgTid != 0 && curTid != 0 && fgTid != curTid) AttachThreadInput(curTid, fgTid, true);
     BringWindowToTop(h);
     SetForegroundWindow(h);
     SetFocus(h);
-    if (fgTid != hTid) AttachThreadInput(fgTid, hTid, false);
+    if (fgTid != 0 && curTid != 0 && fgTid != curTid) AttachThreadInput(curTid, fgTid, false);
     System.Threading.Thread.Sleep(150);
   }
 
@@ -523,10 +524,13 @@ function Test-ElementInWindow {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
     $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
     $curr = $Element
-    while ($curr) {
+    $hops = 0
+    # max-hop guard: cyclic/deep UIA trees must not spin this walk forever
+    while ($curr -and $hops -lt 32) {
       if ($curr.Current.NativeWindowHandle -eq $targetVal) { return $true }
       if ([System.Windows.Automation.Automation]::Compare($curr, $root)) { return $true }
       $curr = $walker.GetParent($curr)
+      $hops++
     }
   } catch {
     return $false
@@ -541,7 +545,9 @@ function Find-TextInputHwnd {
     if ($focused -and (Test-ElementInWindow -Element $focused -Hwnd $Hwnd)) {
       $curr = $focused
       $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
-      while ($curr) {
+      $hops = 0
+      # max-hop guard against cyclic/deep UIA trees
+      while ($curr -and $hops -lt 32) {
         $fh = $curr.Current.NativeWindowHandle
         if ($fh -ne 0) {
           $vp = $null; $tp = $null
@@ -553,6 +559,7 @@ function Find-TextInputHwnd {
           break
         }
         $curr = $walker.GetParent($curr)
+        $hops++
       }
     }
   } catch { }
@@ -762,6 +769,50 @@ function Do-AppState {
 
 # ---------------------------------------------------------------- actions
 
+function Split-AppCommand {
+  # Split an open_app name like 'notepad.exe C:\foo.txt' or
+  # '"C:\Program Files\App\app.exe" --flag "some arg"' into FilePath + ArgumentList.
+  # Returns @(filePath, argumentList).
+  param([string]$Name)
+  $trimmed = ([string]$Name).Trim()
+  if (-not $trimmed) { return @($trimmed, @()) }
+
+  # whitespace tokenizer that respects double quotes
+  $tokens = New-Object System.Collections.Generic.List[string]
+  $sb = ''
+  $inQuote = $false
+  foreach ($ch in $trimmed.ToCharArray()) {
+    if ($ch -eq '"') {
+      if ($inQuote) { if ($sb) { $tokens.Add($sb); $sb = '' }; $inQuote = $false }
+      else { $inQuote = $true }
+    } elseif ($ch -eq ' ' -and -not $inQuote) {
+      if ($sb) { $tokens.Add($sb); $sb = '' }
+    } else {
+      $sb += $ch
+    }
+  }
+  if ($sb) { $tokens.Add($sb) }
+
+  if ($tokens.Count -eq 0) { return @($trimmed, @()) }
+
+  $filePath = $tokens[0]
+  $argList = @()
+  if ($tokens.Count -gt 1) { $argList = @($tokens.GetRange(1, $tokens.Count - 1).ToArray()) }
+
+  # unquoted path containing spaces: extend the file token while the joined prefix exists on disk
+  if ($tokens.Count -gt 1 -and -not (Test-Path $filePath)) {
+    for ($i = 2; $i -le $tokens.Count; $i++) {
+      $candidate = ($tokens.GetRange(0, $i).ToArray() -join ' ')
+      if (Test-Path $candidate) {
+        $filePath = $candidate
+        if ($i -lt $tokens.Count) { $argList = @($tokens.GetRange($i, $tokens.Count - $i).ToArray()) } else { $argList = @() }
+        break
+      }
+    }
+  }
+  return @($filePath, $argList)
+}
+
 $script:payload = $null
 $rawJson = ''
 try {
@@ -860,9 +911,16 @@ try {
         $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
       }
       $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
+      # cursor indicator for ALL element interaction patterns: fire once up-front for
+      # any element with a valid bounding rectangle (Invoke/Toggle/Selection/ExpandCollapse)
+      if ($dispatch -eq 'background') {
+        $elRect = $el.Current.BoundingRectangle
+        if ($elRect.Width -gt 0 -and $elRect.Height -gt 0) {
+          Notify-Cursor -X (Safe-Int ($elRect.X + $elRect.Width / 2)) -Y (Safe-Int ($elRect.Y + $elRect.Height / 2)) -Label ('click element ' + $element)
+        }
+      }
       $ip = $null
       if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) {
-        if ($dispatch -eq 'background') { Notify-Cursor -X (Safe-Int ($el.Current.BoundingRectangle.X + $el.Current.BoundingRectangle.Width / 2)) -Y (Safe-Int ($el.Current.BoundingRectangle.Y + $el.Current.BoundingRectangle.Height / 2)) -Label ('click element ' + $element) }
         $ip.Invoke()
         $result.method = 'invoke_pattern'
         $result.message = "Invoked element $element"
@@ -1148,14 +1206,23 @@ try {
     'open_app' {
       $name = Get-PayloadValue 'name'
       if (-not $name) { throw 'open_app requires name' }
+      # support arguments after the executable (quoted or unquoted):
+      # 'notepad.exe C:\foo.txt', '"C:\Program Files\App\app.exe" --flag value'
+      $cmd = Split-AppCommand -Name ([string]$name)
+      $filePath = $cmd[0]
+      $argList = @($cmd[1])
       # launch WITHOUT stealing the user's foreground window:
       $prevFg = [DshWin32]::GetForegroundWindow()
-      $proc = Start-Process $name -PassThru
+      $proc = if ($argList.Count -gt 0) {
+        Start-Process -FilePath $filePath -ArgumentList $argList -PassThru
+      } else {
+        Start-Process -FilePath $filePath -PassThru
+      }
       Start-Sleep -Milliseconds 800
       if ($prevFg -ne [IntPtr]::Zero -and $prevFg -ne $proc.MainWindowHandle) {
         try { [DshWin32]::ForceForeground($prevFg) } catch { }
       }
-      $result.message = "Started $name (focus restored to your previous window; operated in background)"
+      $result.message = "Started $filePath ($($argList.Count) argument(s)) (focus restored to your previous window; operated in background)"
       $result.pid = $proc.Id
     }
 
