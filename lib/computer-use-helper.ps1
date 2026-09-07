@@ -10,7 +10,14 @@
 param(
   [string]$Action,
   [string]$PayloadJson = '',
-  [switch]$PayloadStdin
+  [switch]$PayloadStdin,
+  # -Server: persistent daemon mode. One JSON request per stdin line
+  # ({ id, action, ...payload fields }), one single-line JSON reply per line of
+  # stdout. No idle exit here: PS blocking reads cannot enforce one, so idle
+  # lifecycle is owned by the node side (300s kill timer in lib/index.js).
+  # Without -Server the one-shot PayloadStdin/PayloadJson
+  # contract is unchanged (fallback path).
+  [switch]$Server
 )
 
 try {
@@ -813,27 +820,17 @@ function Split-AppCommand {
   return @($filePath, $argList)
 }
 
-$script:payload = $null
-$rawJson = ''
-try {
-  if ($PayloadStdin -or ((-not $PayloadJson) -and [Console]::IsInputRedirected)) {
-    $rawJson = [Console]::In.ReadToEnd()
-  }
-  if ((-not $rawJson) -and $PayloadJson) {
-    $rawJson = $PayloadJson
-  }
-  if ($rawJson -and $rawJson.Trim().Length -gt 0) {
-    $script:payload = $rawJson | ConvertFrom-Json
-  }
-} catch {
-  @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
-  exit 0
-}
+# ---------------------------------------------------------------- shared action dispatch
+# Both the one-shot path and the -Server daemon call this; the switch body is
+# unchanged. Returns the reply hashtable (plus any stray pipeline output that
+# leaked inside dispatch, which callers drop).
+function Invoke-ActionRequest {
+  param([string]$Action, $Payload)
+  $script:payload = $Payload
+  $result = @{ ok = $true; action = $Action; message = '' }
 
-$result = @{ ok = $true; action = $Action; message = '' }
-
-try {
-  switch ($Action) {
+  try {
+    switch ($Action) {
     'list_apps' {
       $wins = @([DshWin32]::EnumWindowsList())
       $byPid = @{}
@@ -1236,4 +1233,71 @@ catch {
   $result.message = "$($_.Exception.Message)"
 }
 
-[Console]::Out.Write(($result | ConvertTo-Json -Depth 10 -Compress))
+  return $result
+}
+
+function Write-DaemonReply {
+  param([int]$Id, $Reply)
+  if ($Reply -is [hashtable]) { $Reply.id = $Id }
+  else { $Reply = @{ id = $Id; ok = $false; action = ''; message = 'invalid reply object' } }
+  # single-line JSON, always: compress, then strip any residual newline
+  $json = ($Reply | ConvertTo-Json -Compress -Depth 10) -replace "(`r|`n)", ' '
+  [Console]::Out.WriteLine($json)
+  [Console]::Out.Flush()
+}
+
+# ---------------------------------------------------------------- daemon mode (-Server)
+if ($Server) {
+  # keep the JSONL stdout stream clean: silence Write-Host/information records
+  $InformationPreference = 'SilentlyContinue'
+  # Simple loop: blocking ReadLine -> dispatch -> reply. No idle exit here —
+  # Console.In.Peek() blocks on a redirected pipe and the old async-read poll
+  # was proven to never run the idle check (judge: helper alive at 330s), so
+  # idle lifecycle is owned by the node side instead. Exit on
+  # EOF (stdin closed by node) or process kill.
+  while ($true) {
+    $line = $null
+    try { $line = [Console]::In.ReadLine() } catch { break }
+    if ($null -eq $line) { break }   # stdin closed -> exit cleanly
+    $trimmed = $line.Trim()
+    if ($trimmed.Length -eq 0) { continue }
+    $req = $null
+    $reqId = 0
+    try { $req = $trimmed | ConvertFrom-Json } catch { $req = $null }
+    if ($null -eq $req -or -not $req.action) {
+      Write-DaemonReply -Id $reqId -Reply @{ ok = $false; action = ''; message = 'invalid request' }
+      continue
+    }
+    if ($req.PSObject.Properties['id']) { try { $reqId = [int]$req.id } catch { $reqId = 0 } }
+    $reply = Invoke-ActionRequest -Action ([string]$req.action) -Payload $req
+    # one failed action must never kill the daemon: try/catch inside
+    # Invoke-ActionRequest already converts exceptions to ok:false replies;
+    # here we only drop stray pipeline output (last object is the real reply)
+    if ($reply -is [System.Array] -and $reply.Count -gt 0) { $reply = $reply[$reply.Count - 1] }
+    Write-DaemonReply -Id $reqId -Reply $reply
+  }
+  [Console]::Out.Flush()
+  exit 0
+}
+
+# ---------------------------------------------------------------- one-shot fallback (no -Server)
+$script:payload = $null
+$rawJson = ''
+try {
+  if ($PayloadStdin -or ((-not $PayloadJson) -and [Console]::IsInputRedirected)) {
+    $rawJson = [Console]::In.ReadToEnd()
+  }
+  if ((-not $rawJson) -and $PayloadJson) {
+    $rawJson = $PayloadJson
+  }
+  if ($rawJson -and $rawJson.Trim().Length -gt 0) {
+    $script:payload = $rawJson | ConvertFrom-Json
+  }
+} catch {
+  @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+  exit 0
+}
+
+$out = Invoke-ActionRequest -Action $Action -Payload $script:payload
+if ($out -is [System.Array] -and $out.Count -gt 0) { $out = $out[$out.Count - 1] }
+[Console]::Out.Write(($out | ConvertTo-Json -Depth 10 -Compress))
