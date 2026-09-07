@@ -1,13 +1,35 @@
 param()
 $ErrorActionPreference = "SilentlyContinue"
+Add-Type -AssemblyName System.Windows.Forms
 # DPI-aware FIRST: window coords are then physical pixels, matching the physical UIA coords
 # the helper writes into cursor.state. Without this, DWM scales our position by the DPI factor.
 $dpiSig = @"
-using System; using System.Runtime.InteropServices;
-public static class DshDpi { [DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); }
+using System;
+using System.Runtime.InteropServices;
+
+public static class DshDpi
+{
+  [DllImport("user32.dll", SetLastError = true)] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+
+  public static void InitDpiAwareness()
+  {
+    try
+    {
+      if (!SetProcessDpiAwarenessContext((IntPtr)(-4)))
+      {
+        SetProcessDPIAware();
+      }
+    }
+    catch
+    {
+      try { SetProcessDPIAware(); } catch { }
+    }
+  }
+}
 "@
 Add-Type -TypeDefinition $dpiSig
-[void][DshDpi]::SetProcessDPIAware()
+[DshDpi]::InitDpiAwareness()
 $dir = Join-Path $env:TEMP "dsh-cua"
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 Set-Content -Path (Join-Path $dir "overlay.pid") -Value $PID -Encoding ascii
@@ -21,6 +43,7 @@ $lastSeen = [DateTime]::MinValue
 $lastActive = [DateTime]::Now
 $visible = $false
 while ($true) {
+  [System.Windows.Forms.Application]::DoEvents()
   if (Test-Path $stateFile) {
     try {
       $st = Get-Content -Path $stateFile -Raw -ErrorAction Stop | ConvertFrom-Json

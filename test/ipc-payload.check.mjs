@@ -12,9 +12,15 @@ const indexPath = path.join(rootDir, 'lib', 'index.js')
 const helperPath = path.join(rootDir, 'lib', 'computer-use-helper.ps1')
 const patchPath = path.join(rootDir, 'cordis.patch.yml')
 
-// 1. Export verification
+// 1. Export & schema verification
 assert.equal(typeof runAction, 'function', 'runAction must be exported as a function')
 assert.equal(typeof defineComputerTool, 'function', 'defineComputerTool must be exported as a function')
+
+const bareTool = defineComputerTool()
+assert.ok(bareTool.parameters.properties, 'defineComputerTool().parameters must have properties object')
+assert.ok(bareTool.parameters.properties.name, 'name property must be present in defineComputerTool().parameters.properties')
+assert.equal(bareTool.parameters.properties.name.type, 'string')
+assert.equal(bareTool.parameters.properties.name.description, 'Application name or executable path (for open_app).')
 
 // 2. Static source contract checks
 const indexSrc = fs.readFileSync(indexPath, 'utf8')
@@ -79,7 +85,7 @@ assert.ok(
   'Dead 4-argument SendMessageTimeout overload in DshWin32 must be removed'
 )
 
-// 3. Verification: unchunked set_value vs chunked type in execute
+// 3. Verification: unchunked set_value and direct execution of type without chunking
 const tool = defineComputerTool((def) => def)
 assert.equal(tool.name, 'computer')
 assert.equal(typeof tool.execute, 'function')
@@ -99,17 +105,19 @@ assert.equal(
 )
 assert.equal(setValueRes.action, 'set_value')
 
-// Verify type still chunks long text
+// Verify type is also directly executed WITHOUT chunking
 const largeText = 'B'.repeat(12000)
 const typeRes = await tool.execute({
   action: 'type',
   app: '__dsh_test_nonexistent_window_12345__',
   text: largeText,
 })
-assert.ok(
-  'chunks' in typeRes && typeRes.chunks >= 1,
-  'type execute must chunk long text when length > 6000'
+assert.equal(
+  'chunks' in typeRes,
+  false,
+  'type execute must directly execute without chunking loop'
 )
+assert.equal(typeRes.action, 'type')
 
 // 4. Verification: Stdin streaming with large (>80KB) JSON payload & Unicode/emoji preservation
 const unicodeSignature = '🚀_🌟_Unicode_测试_€_©_🤖_🎉'
@@ -150,5 +158,25 @@ const fallbackOut = execFileSync(psCmd, [
 const fallbackParsed = JSON.parse(fallbackOut.trim())
 assert.equal(fallbackParsed.ok, true, '-PayloadJson fallback should execute list_apps successfully')
 assert.equal(fallbackParsed.action, 'list_apps')
+
+// 6. Verification: Invalid JSON sent to helper stdin returns clean { ok: false, message: ... }
+const invalidJsonOut = execFileSync(psCmd, [
+  '-NoProfile',
+  '-ExecutionPolicy', 'Bypass',
+  '-File', helperPath,
+  '-Action', 'list_apps',
+  '-PayloadStdin',
+], {
+  input: '{ invalid: json syntax',
+  encoding: 'utf8',
+})
+
+const invalidParsed = JSON.parse(invalidJsonOut.trim())
+assert.equal(invalidParsed.ok, false, 'Invalid JSON sent to stdin must return ok: false')
+assert.equal(invalidParsed.action, 'list_apps')
+assert.ok(
+  typeof invalidParsed.message === 'string' && invalidParsed.message.includes('Invalid JSON payload'),
+  'Invalid JSON message must indicate Invalid JSON payload'
+)
 
 console.log('ipc-payload check PASSED')

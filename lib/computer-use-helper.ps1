@@ -94,6 +94,7 @@ public static class DshWin32
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult);
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+  [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
 
   static DshWin32()
   {
@@ -474,9 +475,12 @@ function Ensure-OverlayProcess {
   $dir = Join-Path $env:TEMP 'dsh-cua'
   $pidFile = Join-Path $dir 'overlay.pid'
   if (Test-Path $pidFile) {
-    $pidNow = Get-Content $pidFile -Raw -ErrorAction SilentlyContinue
-    $p = Get-Process -Id ([int]$pidNow) -ErrorAction SilentlyContinue
-    if ($p) { return }
+    $rawPid = Get-Content $pidFile -Raw -ErrorAction SilentlyContinue
+    $pidNow = 0
+    if ($rawPid -and [int]::TryParse($rawPid.Trim(), [ref]$pidNow) -and ($pidNow -gt 0)) {
+      $p = Get-Process -Id $pidNow -ErrorAction SilentlyContinue
+      if ($p) { return }
+    }
   }
   $ov = Join-Path $PSScriptRoot 'virtual-cursor-overlay.ps1'
   if (-not (Test-Path $ov)) { return }
@@ -500,8 +504,59 @@ function Notify-Cursor {
   Write-CursorState -X $X -Y $Y -Label $Label -Show $on
 }
 
+function Test-ElementInWindow {
+  param(
+    [System.Windows.Automation.AutomationElement]$Element,
+    [IntPtr]$Hwnd
+  )
+  if ($null -eq $Element -or $Hwnd -eq [IntPtr]::Zero) { return $false }
+  try {
+    $targetVal = $Hwnd.ToInt64()
+    if ($Element.Current.NativeWindowHandle -eq $targetVal) { return $true }
+    $elHwnd = [IntPtr]$Element.Current.NativeWindowHandle
+    if ($elHwnd -ne [IntPtr]::Zero -and [DshWin32]::IsChild($Hwnd, $elHwnd)) { return $true }
+
+    $targetPid = 0
+    [void][DshWin32]::GetWindowThreadProcessId($Hwnd, [ref]$targetPid)
+    if ($targetPid -ne 0 -and $Element.Current.ProcessId -ne $targetPid) { return $false }
+
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $curr = $Element
+    while ($curr) {
+      if ($curr.Current.NativeWindowHandle -eq $targetVal) { return $true }
+      if ([System.Windows.Automation.Automation]::Compare($curr, $root)) { return $true }
+      $curr = $walker.GetParent($curr)
+    }
+  } catch {
+    return $false
+  }
+  return $false
+}
+
 function Find-TextInputHwnd {
   param([IntPtr]$Hwnd)
+  try {
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused -and (Test-ElementInWindow -Element $focused -Hwnd $Hwnd)) {
+      $curr = $focused
+      $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+      while ($curr) {
+        $fh = $curr.Current.NativeWindowHandle
+        if ($fh -ne 0) {
+          $vp = $null; $tp = $null
+          if ($curr.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -or
+              $curr.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) -or
+              $curr.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$tp)) {
+            return [IntPtr]$fh
+          }
+          break
+        }
+        $curr = $walker.GetParent($curr)
+      }
+    }
+  } catch { }
+
   $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
   $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   foreach ($el in $all) {
@@ -522,6 +577,16 @@ function Find-TextInputHwnd {
 
 function Find-ValuePatternEl {
   param([IntPtr]$Hwnd)
+  try {
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused -and (Test-ElementInWindow -Element $focused -Hwnd $Hwnd)) {
+      $vp = $null
+      if ($focused.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+        return $focused
+      }
+    }
+  } catch { }
+
   $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
   $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   foreach ($el in $all) {
@@ -699,18 +764,19 @@ function Do-AppState {
 
 $script:payload = $null
 $rawJson = ''
-if ($PayloadStdin -or ((-not $PayloadJson) -and [Console]::IsInputRedirected)) {
-  try {
+try {
+  if ($PayloadStdin -or ((-not $PayloadJson) -and [Console]::IsInputRedirected)) {
     $rawJson = [Console]::In.ReadToEnd()
-  } catch {
-    $rawJson = ''
   }
-}
-if ((-not $rawJson) -and $PayloadJson) {
-  $rawJson = $PayloadJson
-}
-if ($rawJson -and $rawJson.Trim().Length -gt 0) {
-  $script:payload = $rawJson | ConvertFrom-Json
+  if ((-not $rawJson) -and $PayloadJson) {
+    $rawJson = $PayloadJson
+  }
+  if ($rawJson -and $rawJson.Trim().Length -gt 0) {
+    $script:payload = $rawJson | ConvertFrom-Json
+  }
+} catch {
+  @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+  exit 0
 }
 
 $result = @{ ok = $true; action = $Action; message = '' }
