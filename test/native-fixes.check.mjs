@@ -86,6 +86,45 @@ assert.match(
 )
 
 // 6. virtual-cursor-overlay.ps1 fixes
+assert.ok(
+  overlayContent.includes('SetProcessDpiAwarenessContext((IntPtr)(-4))'),
+  'overlay should call SetProcessDpiAwarenessContext((IntPtr)(-4))'
+)
+assert.ok(
+  overlayContent.includes('SetProcessDPIAware()'),
+  'overlay should have fallback to SetProcessDPIAware()'
+)
+assert.ok(
+  overlayContent.includes('[DshDpi]::InitDpiAwareness()'),
+  'overlay should invoke InitDpiAwareness at startup'
+)
+assert.ok(
+  overlayContent.includes('[System.Windows.Forms.Application]::DoEvents()'),
+  'overlay loop must call [System.Windows.Forms.Application]::DoEvents()'
+)
+
+// 7. Ensure-OverlayProcess PID guard & Focused Element Priority in helper
+assert.match(
+  helperContent,
+  /\$pidNow\s*-gt\s*0.*?Get-Process\s*-Id\s*\$pidNow/s,
+  'Ensure-OverlayProcess must check $pidNow -gt 0 before Get-Process'
+)
+assert.match(
+  helperContent,
+  /function\s+Find-TextInputHwnd.*?\[System\.Windows\.Automation\.AutomationElement\]::FocusedElement/s,
+  'Find-TextInputHwnd must check FocusedElement first'
+)
+assert.match(
+  helperContent,
+  /function\s+Find-ValuePatternEl.*?\[System\.Windows\.Automation\.AutomationElement\]::FocusedElement/s,
+  'Find-ValuePatternEl must check FocusedElement first'
+)
+assert.match(
+  helperContent,
+  /catch\s*\{\s*@\{\s*ok\s*=\s*\$false;\s*action\s*=\s*\$Action;\s*message\s*=\s*"Invalid JSON payload:/s,
+  'computer-use-helper.ps1 must catch JSON parse errors and return compressed JSON with ok: false'
+)
+
 const b64Match = overlayContent.match(/\$b64\s*=\s*"([^"]+)"/)
 assert.ok(b64Match, 'overlay should contain base64 embedded C#')
 const overlayCs = Buffer.from(b64Match[1], 'base64').toString('utf8')
@@ -139,6 +178,29 @@ const testScript = `powershell -NoProfile -Command "
   $out = & '${helperPath.replace(/'/g, "''")}' -Action list_apps
   $json = $out | ConvertFrom-Json
   if (-not $json.ok) { exit 11 }
+
+  # Test Ensure-OverlayProcess PID guard logic with 0, whitespace, corrupt PID, and valid PID
+  $tempDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'dsh-cua-test-' + [System.Guid]::NewGuid().ToString('N'))
+  $null = New-Item -ItemType Directory -Path $tempDir -Force
+  try {
+    $pidFile = [System.IO.Path]::Combine($tempDir, 'overlay.pid')
+    $testBadPids = @('', '   ', '0', 'corrupt_pid', '-123', '   0   ')
+    foreach ($bad in $testBadPids) {
+      Set-Content -Path $pidFile -Value $bad -Encoding ascii
+      $rawPid = Get-Content $pidFile -Raw -ErrorAction SilentlyContinue
+      $pidNow = 0
+      $isValid = ($rawPid -and [int]::TryParse($rawPid.Trim(), [ref]$pidNow) -and ($pidNow -gt 0))
+      if ($isValid) { exit 20 }
+    }
+    # Valid positive PID
+    Set-Content -Path $pidFile -Value '65432' -Encoding ascii
+    $rawPid = Get-Content $pidFile -Raw -ErrorAction SilentlyContinue
+    $pidNow = 0
+    $isValid = ($rawPid -and [int]::TryParse($rawPid.Trim(), [ref]$pidNow) -and ($pidNow -gt 0))
+    if (-not $isValid -or $pidNow -ne 65432) { exit 21 }
+  } finally {
+    Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
 
   exit 0
 "`
