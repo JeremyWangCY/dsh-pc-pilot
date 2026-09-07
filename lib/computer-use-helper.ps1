@@ -919,30 +919,34 @@ function Get-ClipboardTextSafe {
     }
     return [System.Windows.Forms.Clipboard]::GetText()
   } else {
-    $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
-    $rs.ApartmentState = [System.Threading.ApartmentState]::STA
-    $rs.Open()
-    $ps = [System.Management.Automation.PowerShell]::Create()
-    $ps.Runspace = $rs
-    $null = $ps.AddScript({
-      Add-Type -AssemblyName System.Windows.Forms
-      for ($i = 0; $i -lt 10; $i++) {
-        try {
-          if ([System.Windows.Forms.Clipboard]::ContainsText()) {
-            return [System.Windows.Forms.Clipboard]::GetText()
+    $rs = $null; $ps = $null
+    try {
+      $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+      $rs.ApartmentState = [System.Threading.ApartmentState]::STA
+      $rs.Open()
+      $ps = [System.Management.Automation.PowerShell]::Create()
+      $ps.Runspace = $rs
+      $null = $ps.AddScript({
+        Add-Type -AssemblyName System.Windows.Forms
+        for ($i = 0; $i -lt 10; $i++) {
+          try {
+            if ([System.Windows.Forms.Clipboard]::ContainsText()) {
+              return [System.Windows.Forms.Clipboard]::GetText()
+            }
+            return ''
+          } catch {
+            Start-Sleep -Milliseconds 50
           }
-          return ''
-        } catch {
-          Start-Sleep -Milliseconds 50
         }
-      }
-      return [System.Windows.Forms.Clipboard]::GetText()
-    })
-    $out = $ps.Invoke()
-    $ps.Dispose()
-    $rs.Dispose()
-    if ($out -and $out.Count -gt 0) { return [string]$out[0] }
-    return ''
+        return [System.Windows.Forms.Clipboard]::GetText()
+      })
+      $out = $ps.Invoke()
+      if ($out -and $out.Count -gt 0) { return [string]$out[0] }
+      return ''
+    } finally {
+      if ($null -ne $ps) { $ps.Dispose() }
+      if ($null -ne $rs) { $rs.Dispose() }
+    }
   }
 }
 
@@ -968,35 +972,39 @@ function Set-ClipboardTextSafe {
       [System.Windows.Forms.Clipboard]::SetText($Text)
     }
   } else {
-    $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
-    $rs.ApartmentState = [System.Threading.ApartmentState]::STA
-    $rs.Open()
-    $ps = [System.Management.Automation.PowerShell]::Create()
-    $ps.Runspace = $rs
-    $null = $ps.AddScript({
-      param($t)
-      Add-Type -AssemblyName System.Windows.Forms
-      for ($i = 0; $i -lt 10; $i++) {
-        try {
-          if ($t.Length -eq 0) {
-            [System.Windows.Forms.Clipboard]::Clear()
-          } else {
-            [System.Windows.Forms.Clipboard]::SetText($t)
+    $rs = $null; $ps = $null
+    try {
+      $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+      $rs.ApartmentState = [System.Threading.ApartmentState]::STA
+      $rs.Open()
+      $ps = [System.Management.Automation.PowerShell]::Create()
+      $ps.Runspace = $rs
+      $null = $ps.AddScript({
+        param($t)
+        Add-Type -AssemblyName System.Windows.Forms
+        for ($i = 0; $i -lt 10; $i++) {
+          try {
+            if ($t.Length -eq 0) {
+              [System.Windows.Forms.Clipboard]::Clear()
+            } else {
+              [System.Windows.Forms.Clipboard]::SetText($t)
+            }
+            return
+          } catch {
+            Start-Sleep -Milliseconds 50
           }
-          return
-        } catch {
-          Start-Sleep -Milliseconds 50
         }
-      }
-      if ($t.Length -eq 0) {
-        [System.Windows.Forms.Clipboard]::Clear()
-      } else {
-        [System.Windows.Forms.Clipboard]::SetText($t)
-      }
-    }).AddArgument($Text)
-    $null = $ps.Invoke()
-    $ps.Dispose()
-    $rs.Dispose()
+        if ($t.Length -eq 0) {
+          [System.Windows.Forms.Clipboard]::Clear()
+        } else {
+          [System.Windows.Forms.Clipboard]::SetText($t)
+        }
+      }).AddArgument($Text)
+      $null = $ps.Invoke()
+    } finally {
+      if ($null -ne $ps) { $ps.Dispose() }
+      if ($null -ne $rs) { $rs.Dispose() }
+    }
   }
 }
 
@@ -1044,7 +1052,8 @@ function Invoke-MouseButtonAction {
   if ($dispatch -eq 'background') {
     $pt = New-Object System.Windows.Point($sx, $sy)
     $h = [IntPtr]::Zero
-    $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+    $wEl = $null
+    try { $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt) } catch { }
     for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
       $nh = $wEl.Current.NativeWindowHandle
       if ($nh -ne 0) { $h = [IntPtr]$nh; break }
