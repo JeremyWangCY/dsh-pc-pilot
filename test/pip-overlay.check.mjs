@@ -18,6 +18,7 @@ assert.ok(pipSrc.includes('CornerRadius="16"'), 'Must have Apple 16px corner rad
 assert.ok(pipSrc.includes('Background="#E61C1C1E"'), 'Must use Apple dark frosted glass background')
 assert.ok(pipSrc.includes('BtnClose') && pipSrc.includes('BtnMini') && pipSrc.includes('BtnExpand'), 'Must have 3 Apple traffic light buttons')
 assert.ok(pipSrc.includes('#FF5F56') && pipSrc.includes('#FFBD2E') && pipSrc.includes('#27C93F'), 'Traffic lights must use genuine Apple hex colors')
+assert.ok(pipSrc.includes('HorizontalAlignment="Right"'), 'Traffic light buttons must be placed at the top-right corner')
 assert.ok(pipSrc.includes('WS_EX_NOACTIVATE'), 'Must apply WS_EX_NOACTIVATE to prevent focus theft')
 assert.ok(pipSrc.includes('ShowActivated="False"'), 'Must specify ShowActivated="False" to prevent managed WPF focus theft')
 assert.ok(pipSrc.includes('Focusable="False"'), 'Must specify Focusable="False"')

@@ -1492,7 +1492,12 @@ function Do-AppState {
       }
     }
     if ($shot -and $shot.path) {
-      try { Notify-Pip -Label ('Viewing ' + $win.Title) -FramePath $shot.path } catch { }
+      $t = if ($win.Title) { [string]$win.Title } else { '' }
+      $isUserWorkbench = ($t -like '*Workbench*' -or $t -like '*DeepX*' -or $t -like '*deepx*')
+      $isPhysicalDesktopMirror = ($shot.method -eq 'bitblt_screen' -and $win.Rect.Left -ge 0 -and $win.Rect.Left -lt 2000)
+      if (-not $isUserWorkbench -and -not $isPhysicalDesktopMirror) {
+        try { Notify-Pip -Label ('Viewing ' + $win.Title) -FramePath $shot.path } catch { }
+      }
     }
   }
   $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
@@ -2437,8 +2442,9 @@ function Invoke-ActionRequest {
       $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
       if ($wins.Count -gt 0) {
         $result.hwnd = $wins[0].Hwnd.ToInt64()
-        $isolate = Get-PayloadValue 'isolate'
-        if ($isolate -or (Get-PayloadValue 'virtual_canvas')) {
+        $isolateVal = Get-PayloadValue 'isolate'
+        $shouldIsolate = if ($null -ne $isolateVal) { [bool]$isolateVal } else { ((Get-Dispatch) -eq 'background') }
+        if ($shouldIsolate) {
           [DshWin32]::SetWindowPos([IntPtr]$result.hwnd, [IntPtr]::Zero, 3000, 0, 1280, 800, 0x0050) | Out-Null
         }
       }

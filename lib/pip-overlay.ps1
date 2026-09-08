@@ -56,27 +56,27 @@ $xaml = @"
         <Grid>
             <!-- Header Bar -->
             <Grid Name="HeaderBar" Height="36" VerticalAlignment="Top" Margin="14,6,14,0" Background="Transparent">
-                <!-- Apple Traffic Light Buttons -->
+                <!-- Left Title and Live Pill -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
-                    <Border Name="BtnClose" Width="11" Height="11" CornerRadius="5.5" Background="#FF5F56" Margin="0,0,7,0" Cursor="Hand">
-                        <Border.ToolTip><ToolTip Content="Close PiP"/></Border.ToolTip>
-                    </Border>
-                    <Border Name="BtnMini" Width="11" Height="11" CornerRadius="5.5" Background="#FFBD2E" Margin="0,0,7,0" Cursor="Hand">
-                        <Border.ToolTip><ToolTip Content="Dynamic Island Mini Mode"/></Border.ToolTip>
-                    </Border>
-                    <Border Name="BtnExpand" Width="11" Height="11" CornerRadius="5.5" Background="#27C93F" Cursor="Hand">
-                        <Border.ToolTip><ToolTip Content="Toggle Large Preview"/></Border.ToolTip>
-                    </Border>
-                </StackPanel>
-
-                <!-- Centered Title and Live Pill -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <TextBlock Text="AI Workspace" Foreground="#E5FFFFFF" FontSize="11" FontWeight="SemiBold" FontFamily="Segoe UI Variable Display, SF Pro Text, Segoe UI"/>
                     <Border Background="#2634C759" CornerRadius="8" Padding="6,2" Margin="8,0,0,0">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Ellipse Width="5" Height="5" Fill="#34C759" Margin="0,0,4,0"/>
                             <TextBlock Text="Live" Foreground="#34C759" FontSize="9" FontWeight="Bold"/>
                         </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Right Apple Traffic Light Control Buttons -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <Border Name="BtnMini" Width="11" Height="11" CornerRadius="5.5" Background="#FFBD2E" Margin="0,0,7,0" Cursor="Hand">
+                        <Border.ToolTip><ToolTip Content="Dynamic Island Mini Mode"/></Border.ToolTip>
+                    </Border>
+                    <Border Name="BtnExpand" Width="11" Height="11" CornerRadius="5.5" Background="#27C93F" Margin="0,0,7,0" Cursor="Hand">
+                        <Border.ToolTip><ToolTip Content="Toggle Large Preview"/></Border.ToolTip>
+                    </Border>
+                    <Border Name="BtnClose" Width="11" Height="11" CornerRadius="5.5" Background="#FF5F56" Cursor="Hand">
+                        <Border.ToolTip><ToolTip Content="Close PiP"/></Border.ToolTip>
                     </Border>
                 </StackPanel>
             </Grid>
