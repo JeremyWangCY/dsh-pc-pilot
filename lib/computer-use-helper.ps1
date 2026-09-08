@@ -734,12 +734,8 @@ function Resolve-TargetWindow {
   if ($null -ne $target -and [DshWin32]::IsIconic($target.Hwnd)) {
     $currAct = Get-PayloadValue 'action'
     if ($currAct -notin @('get_window', 'list_windows')) {
-      $prevFg = [DshWin32]::GetForegroundWindow()
       [DshWin32]::ShowWindow($target.Hwnd, 4) | Out-Null
-      [DshWin32]::PushWindowToBottom($target.Hwnd) | Out-Null
-      if ($prevFg -ne [IntPtr]::Zero -and [DshWin32]::GetForegroundWindow() -ne $prevFg) {
-        try { [DshWin32]::ForceForeground($prevFg) } catch { }
-      }
+      [DshWin32]::SetWindowPos($target.Hwnd, [DshWin32]::HWND_BOTTOM, 0, 0, 0, 0, 0x0053) | Out-Null
       $target.Rect = [DshWin32]::GetDwmRect($target.Hwnd)
       $target.Minimized = $false
     }
@@ -1299,6 +1295,35 @@ function Get-OverlayPoint-WindowCenter {
   return @($cx, $cy)
 }
 
+function Get-OverlayPoint-Element {
+  param($Element, $Win)
+  if (-not $Element) {
+    if ($Win) { return (Get-OverlayPoint-WindowCenter $Win) }
+    return $null
+  }
+  try {
+    $sip = $null
+    if ($Element.Current.IsOffscreen -and $Element.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$sip)) {
+      try { $sip.ScrollIntoView() } catch { }
+    }
+    $er = $Element.Current.BoundingRectangle
+    if ($er.Width -gt 0 -and $er.Height -gt 0) {
+      $cx = Safe-Int ($er.X + $er.Width / 2)
+      $cy = Safe-Int ($er.Y + $er.Height / 2)
+      if ($Win) {
+        $wr = $Win.Rect
+        if ($cx -ge $wr.Left -and $cx -le $wr.Right -and $cy -ge $wr.Top -and $cy -le $wr.Bottom) {
+          return @($cx, $cy)
+        }
+      } elseif ($cx -gt 0 -and $cy -gt 0) {
+        return @($cx, $cy)
+      }
+    }
+  } catch { }
+  if ($Win) { return (Get-OverlayPoint-WindowCenter $Win) }
+  return $null
+}
+
 function Test-BitmapBlank {
   # True when the sampled quadrant points AND the border/title points are all pure
   # black — the PrintWindow / screen-DC signature of DirectComposition/UWP/
@@ -1772,9 +1797,10 @@ function Invoke-ActionRequest {
       if ($null -ne $rawElement -and ([string]$rawElement).Trim() -ne '' -and $win) {
         try {
           $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index ([int]$rawElement)
-          $er = $el.Current.BoundingRectangle
-          if ($er.Width -gt 0 -and $er.Height -gt 0) {
-            $sx = Safe-Int ($er.X + $er.Width / 2); $sy = Safe-Int ($er.Y + $er.Height / 2)
+          # Resolve element BoundingRectangle center point via Get-OverlayPoint-Element
+          $pt = Get-OverlayPoint-Element -Element $el -Win $win
+          if ($pt) {
+            $sx = $pt[0]; $sy = $pt[1]
             $res = $true; $result.element = [int]$rawElement
           }
         } catch { }
@@ -1789,7 +1815,7 @@ function Invoke-ActionRequest {
           } elseif ($hx -or $hy) {
             $sx = $r.Left + $x; $sy = $r.Top + $y
           }
-          if ((-not $hx -and -not $hy) -or ($x -le 0 -and $y -le 0) -or ($sx -le 0 -and $sy -le 0)) {
+          if ((-not $hx -and -not $hy) -or ($x -le 0 -and $y -le 0) -or ($sx -le 0 -or $sy -le 0)) {
             $c = Get-OverlayPoint-WindowCenter $win; $sx = $c[0]; $sy = $c[1]
           }
         } else {
@@ -1878,9 +1904,9 @@ function Invoke-ActionRequest {
       # cursor indicator for ALL element interaction patterns: fire once up-front for
       # any element with a valid bounding rectangle (Invoke/Toggle/Selection/ExpandCollapse)
       if ($dispatch -eq 'background') {
-        $elRect = $el.Current.BoundingRectangle
-        if ($elRect.Width -gt 0 -and $elRect.Height -gt 0) {
-          Notify-Cursor -X (Safe-Int ($elRect.X + $elRect.Width / 2)) -Y (Safe-Int ($elRect.Y + $elRect.Height / 2)) -Label ('click element ' + $element)
+        $pt = Get-OverlayPoint-Element -Element $el -Win $win
+        if ($pt) {
+          Notify-Cursor -X $pt[0] -Y $pt[1] -Label ('click element ' + $element)
         }
       } else {
         $elRect = $el.Current.BoundingRectangle
@@ -1960,7 +1986,10 @@ function Invoke-ActionRequest {
       $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
       $vp = $null
       if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
-        if ($dispatch -eq 'background') { Notify-Cursor -X (Safe-Int ($el.Current.BoundingRectangle.X + $el.Current.BoundingRectangle.Width / 2)) -Y (Safe-Int ($el.Current.BoundingRectangle.Y + $el.Current.BoundingRectangle.Height / 2)) -Label 'set_value' }
+        if ($dispatch -eq 'background') {
+          $pt = Get-OverlayPoint-Element -Element $el -Win $win
+          if ($pt) { Notify-Cursor -X $pt[0] -Y $pt[1] -Label 'set_value' }
+        }
         $vp.SetValue($value)
         $result.method = 'value_pattern'
         $result.message = "Set element $element value"
@@ -2356,23 +2385,10 @@ function Invoke-ActionRequest {
       }
       $result.message = "Started $filePath ($($argList.Count) argument(s)) (launched $style in background)"
       $result.pid = $proc.Id
-      # Asynchronous focus guard and lookup for background launch:
-      # Edge/Chrome or multi-instance apps may contact an existing instance and try to jump forward.
-      # Watch for 1s: if an app window steals foreground, immediately push to bottom & restore user foreground!
-      for ($i = 0; $i -lt 15; $i++) {
-        Start-Sleep -Milliseconds 50
-        if ($style -eq 'Minimized' -or (Get-Dispatch) -eq 'background') {
-          $curFg = [DshWin32]::GetForegroundWindow()
-          if ($curFg -ne [IntPtr]::Zero -and $prevUserFg -ne [IntPtr]::Zero -and $curFg -ne $prevUserFg) {
-            [DshWin32]::PushWindowToBottom($curFg) | Out-Null
-            try { [DshWin32]::ForceForeground($prevUserFg) } catch { }
-          }
-        }
-        if (-not $result.hwnd) {
-          $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
-          if ($wins.Count -gt 0) { $result.hwnd = $wins[0].Hwnd.ToInt64() }
-        }
-      }
+      # Minimal lookup for main window handle
+      Start-Sleep -Milliseconds 80
+      $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
+      if ($wins.Count -gt 0) { $result.hwnd = $wins[0].Hwnd.ToInt64() }
     }
 
     'mouse_move' {
@@ -2632,9 +2648,9 @@ function Invoke-ActionRequest {
       }
       $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
       if ($dispatch -eq 'background') {
-        $elRect = $el.Current.BoundingRectangle
-        if ($elRect.Width -gt 0 -and $elRect.Height -gt 0) {
-          Notify-Cursor -X (Safe-Int ($elRect.X + $elRect.Width / 2)) -Y (Safe-Int ($elRect.Y + $elRect.Height / 2)) -Label ('perform ' + $perform)
+        $pt = Get-OverlayPoint-Element -Element $el -Win $win
+        if ($pt) {
+          Notify-Cursor -X $pt[0] -Y $pt[1] -Label ('perform ' + $perform)
         }
       }
       if (-not $perform) {
