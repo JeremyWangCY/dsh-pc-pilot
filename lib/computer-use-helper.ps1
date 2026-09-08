@@ -961,7 +961,51 @@ function Notify-Cursor {
   $on = Get-OverlayEnabled
   if ($on) { Ensure-OverlayProcess }
   Write-CursorState -X $X -Y $Y -Label $Label -Show $on
+  try { Notify-Pip -Label $Label } catch { }
 }
+
+function Ensure-PipOverlayProcess {
+  $dir = Join-Path $env:TEMP 'dsh-cua'
+  $pidFile = Join-Path $dir 'pip.pid'
+  if (Test-Path $pidFile) {
+    $rawPid = Get-Content $pidFile -Raw -ErrorAction SilentlyContinue
+    $pidNow = 0
+    if ($rawPid -and [int]::TryParse($rawPid.Trim(), [ref]$pidNow) -and ($pidNow -gt 0)) {
+      $p = Get-Process -Id $pidNow -ErrorAction SilentlyContinue
+      if ($p) { return }
+    }
+  }
+  $ov = Join-Path $PSScriptRoot 'pip-overlay.ps1'
+  if (-not (Test-Path $ov)) { return }
+  $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"`"$ov`"") -WindowStyle Hidden -PassThru
+  if ($proc) {
+    try { [System.IO.File]::WriteAllText($pidFile, [string]$proc.Id, [System.Text.Encoding]::ASCII) } catch { }
+  }
+}
+
+function Notify-Pip {
+  param([string]$Label, [string]$FramePath, [bool]$Show = $true)
+  Ensure-PipOverlayProcess
+  $dir = Join-Path $env:TEMP 'dsh-cua'
+  if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  $ts = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+  $state = [ordered]@{
+    label = $Label
+    frame = if ($FramePath) { $FramePath } else { '' }
+    ts = $ts
+    show = $Show
+  } | ConvertTo-Json -Compress
+  $statePath = Join-Path $dir 'pip.state'
+  for ($i = 0; $i -lt 8; $i++) {
+    try {
+      [System.IO.File]::WriteAllText($statePath, $state, [System.Text.Encoding]::ASCII)
+      break
+    } catch {
+      Start-Sleep -Milliseconds 15
+    }
+  }
+}
+
 
 function Test-ElementInWindow {
   param(
@@ -1446,6 +1490,9 @@ function Do-AppState {
         window_rect = @{ x = $win.Rect.Left; y = $win.Rect.Top }
         error = 'window_minimized; screenshot is blank'
       }
+    }
+    if ($shot -and $shot.path) {
+      try { Notify-Pip -Label ('Viewing ' + $win.Title) -FramePath $shot.path } catch { }
     }
   }
   $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
@@ -2388,7 +2435,14 @@ function Invoke-ActionRequest {
       # Minimal lookup for main window handle
       Start-Sleep -Milliseconds 80
       $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
-      if ($wins.Count -gt 0) { $result.hwnd = $wins[0].Hwnd.ToInt64() }
+      if ($wins.Count -gt 0) {
+        $result.hwnd = $wins[0].Hwnd.ToInt64()
+        $isolate = Get-PayloadValue 'isolate'
+        if ($isolate -or (Get-PayloadValue 'virtual_canvas')) {
+          [DshWin32]::SetWindowPos([IntPtr]$result.hwnd, [IntPtr]::Zero, 3000, 0, 1280, 800, 0x0050) | Out-Null
+        }
+      }
+      try { Notify-Pip -Label ("Opening " + [System.IO.Path]::GetFileName($filePath)) } catch { }
     }
 
     'mouse_move' {
@@ -2782,6 +2836,29 @@ function Invoke-ActionRequest {
           $result.message = "Caret placed at offset $start (length 0)"
         }
       }
+    }
+
+
+    'toggle_pip' {
+      $show = Get-PayloadValue 'show'
+      if ($null -eq $show) { $show = $true }
+      Notify-Pip -Label 'PiP toggled' -Show ([bool]$show)
+      $result.message = "PiP window show set to $show"
+      $result.pip_active = [bool]$show
+    }
+
+    'isolate_window' {
+      $app = Get-PayloadValue 'app'
+      $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+      $restore = Get-PayloadValue 'restore'
+      if ($restore) {
+        [DshWin32]::SetWindowPos($win.Hwnd, [IntPtr]::Zero, 100, 100, 1280, 800, 0x0050) | Out-Null
+        $result.message = "Restored window to primary screen (100, 100)"
+      } else {
+        [DshWin32]::SetWindowPos($win.Hwnd, [IntPtr]::Zero, 3000, 0, 1280, 800, 0x0050) | Out-Null
+        $result.message = "Moved window to isolated virtual canvas (3000, 0)"
+      }
+      $result.window = (Get-WindowInfo $win)
     }
 
     default {
