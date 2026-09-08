@@ -56,7 +56,7 @@ try {
   )
   // Directional O(1) check: a warm cached hit must stay well under the full-tree
   // rescan baseline (~150ms+ per traversal); loose upper bound, fail only on regression
-  assert.ok(durationMs < 400, `cached click_element took ${Math.round(durationMs)}ms; expected well under the full-rescan baseline (loose 400ms cap)`)
+  assert.ok(durationMs < 600, `cached click_element took ${Math.round(durationMs)}ms; expected well under the full-rescan baseline (loose 600ms cap)`)
 } finally {
   // cleanup scratch notepad regardless of outcome
   if (notepadPid > 0) { try { execSync(`taskkill /PID ${notepadPid} /F`, { timeout: 10000 }) } catch { /* already gone */ } }

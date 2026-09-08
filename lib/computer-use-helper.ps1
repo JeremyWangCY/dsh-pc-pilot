@@ -1705,6 +1705,8 @@ function Invoke-ActionRequest {
   param([string]$Action, $Payload)
   $script:payload = $Payload
   $result = @{ ok = $true; action = $Action; message = '' }
+  $prevUserFg = [DshWin32]::GetForegroundWindow()
+  $dispatchMode = Get-Dispatch
 
   try {
     switch ($Action) {
@@ -2354,13 +2356,21 @@ function Invoke-ActionRequest {
       }
       $result.message = "Started $filePath ($($argList.Count) argument(s)) (launched $style in background)"
       $result.pid = $proc.Id
-      # Quick non-blocking lookup for main window handle
-      for ($i = 0; $i -lt 12; $i++) {
+      # Asynchronous focus guard and lookup for background launch:
+      # Edge/Chrome or multi-instance apps may contact an existing instance and try to jump forward.
+      # Watch for 1s: if an app window steals foreground, immediately push to bottom & restore user foreground!
+      for ($i = 0; $i -lt 15; $i++) {
         Start-Sleep -Milliseconds 50
-        $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
-        if ($wins.Count -gt 0) {
-          $result.hwnd = $wins[0].Hwnd.ToInt64()
-          break
+        if ($style -eq 'Minimized' -or (Get-Dispatch) -eq 'background') {
+          $curFg = [DshWin32]::GetForegroundWindow()
+          if ($curFg -ne [IntPtr]::Zero -and $prevUserFg -ne [IntPtr]::Zero -and $curFg -ne $prevUserFg) {
+            [DshWin32]::PushWindowToBottom($curFg) | Out-Null
+            try { [DshWin32]::ForceForeground($prevUserFg) } catch { }
+          }
+        }
+        if (-not $result.hwnd) {
+          $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
+          if ($wins.Count -gt 0) { $result.hwnd = $wins[0].Hwnd.ToInt64() }
         }
       }
     }
@@ -2766,6 +2776,18 @@ function Invoke-ActionRequest {
 catch {
   $result.ok = $false
   $result.message = "$($_.Exception.Message)"
+}
+finally {
+  # Universal non-intrusive background guard: In background dispatch mode, the user's active window must NEVER be stolen!
+  # If the target app (e.g. Edge/Chromium UIA Invoke, WM messages) activates itself,
+  # immediately demote the target window to bottom and restore the user's active window!
+  if ($dispatchMode -eq 'background' -and $Action -notin @('activate_window') -and $prevUserFg -ne [IntPtr]::Zero) {
+    $curFg = [DshWin32]::GetForegroundWindow()
+    if ($curFg -ne [IntPtr]::Zero -and $curFg -ne $prevUserFg) {
+      [DshWin32]::PushWindowToBottom($curFg) | Out-Null
+      try { [DshWin32]::ForceForeground($prevUserFg) } catch { }
+    }
+  }
 }
 
   return $result
