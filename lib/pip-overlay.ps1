@@ -51,6 +51,13 @@ public static class DshPipGdi {
   [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
   [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
   public const uint SRCCOPY = 0x00CC0020;
+  [StructLayout(LayoutKind.Sequential)]
+  public struct POINT { public int X; public int Y; }
+  [DllImport("gdi32.dll")] public static extern IntPtr CreatePen(int style, int width, uint color);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateSolidBrush(uint color);
+  [DllImport("gdi32.dll")] public static extern IntPtr GetStockObject(int i);
+  [DllImport("gdi32.dll")] public static extern bool Polygon(IntPtr hdc, POINT[] pts, int count);
+  [DllImport("gdi32.dll")] public static extern bool Ellipse(IntPtr hdc, int left, int top, int right, int bottom);
 
   // All enum logic runs inside C#: PowerShell struct-byref marshaling of DISPLAY_DEVICE
   // fails silently, so the PowerShell loop approach cannot be trusted here.
@@ -74,6 +81,15 @@ public static class DshPipGdi {
   // Pure GDI capture of a screen rect; returns a caller-owned HBITMAP (delete after use).
   public static IntPtr CaptureRect(int x, int y, int w, int h)
   {
+    return CaptureRectWithCursor(x, y, w, h, 0, 0, false);
+  }
+
+  // Same capture, but when the AI's virtual cursor (cursor.state, physical screen
+  // coords) sits inside the rect, composite a codex-style arrow + focus ring at
+  // its exact mapped position — so the user can see what the AI is about to click
+  // without leaving the primary screen.
+  public static IntPtr CaptureRectWithCursor(int x, int y, int w, int h, int cx, int cy, bool showCursor)
+  {
     IntPtr hdcScreen = GetDC(IntPtr.Zero);
     if (hdcScreen == IntPtr.Zero) return IntPtr.Zero;
     try
@@ -83,6 +99,28 @@ public static class DshPipGdi {
       if (hMem == IntPtr.Zero || hBmp == IntPtr.Zero) { if (hBmp != IntPtr.Zero) DeleteObject(hBmp); if (hMem != IntPtr.Zero) DeleteDC(hMem); return IntPtr.Zero; }
       IntPtr old = SelectObject(hMem, hBmp);
       BitBlt(hMem, 0, 0, w, h, hdcScreen, x, y, SRCCOPY);
+      if (showCursor && cx >= x && cy >= y && cx < x + w && cy < y + h)
+      {
+        int lx = cx - x, ly = cy - y;
+        // focus ring: hollow circle in #0A84FF (COLORREF is 0x00BBGGRR)
+        IntPtr ringPen = CreatePen(0, 8, 0x00FF840Au);
+        IntPtr hollow = GetStockObject(5); // NULL_BRUSH
+        IntPtr oPen = SelectObject(hMem, ringPen); IntPtr oBrush = SelectObject(hMem, hollow);
+        Ellipse(hMem, lx - 66, ly - 66, lx + 66, ly + 66);
+        SelectObject(hMem, oPen); SelectObject(hMem, oBrush);
+        DeleteObject(ringPen);
+        // codex-style arrow (DshVcLayer tip geometry scaled 3.2x): dark outline + white body
+        double s = 3.2;
+        double[,] rel = { {0.0,0.0},{0.0,17.0},{4.3,13.5},{7.4,21.5},{10.5,20.3},{7.4,12.3},{13.5,12.3} };
+        POINT[] pts = new POINT[7];
+        for (int i = 0; i < 7; i++) { pts[i].X = (int)Math.Round(lx + rel[i,0] * s); pts[i].Y = (int)Math.Round(ly + rel[i,1] * s); }
+        IntPtr darkPen = CreatePen(0, 7, 0x00000000u);
+        IntPtr whiteBrush = CreateSolidBrush(0x00FFFFFFu);
+        IntPtr aPen = SelectObject(hMem, darkPen); IntPtr aBrush = SelectObject(hMem, whiteBrush);
+        Polygon(hMem, pts, 7);
+        SelectObject(hMem, aPen); SelectObject(hMem, aBrush);
+        DeleteObject(darkPen); DeleteObject(whiteBrush);
+      }
       SelectObject(hMem, old);
       DeleteDC(hMem);
       return hBmp;
@@ -220,6 +258,15 @@ $script:lastActive = [DateTime]::Now
 $script:tickCount = 0
 $script:vddRect = $null
 $script:vddRectAt = [DateTime]::MinValue
+# AI virtual cursor state (cursor.state, physical screen coords — those land on
+# the virtual canvas when AI windows are parked there)
+$script:cursorFile = Join-Path $dir "cursor.state"
+$script:cursorX = 0
+$script:cursorY = 0
+$script:cursorShow = $false
+$script:cursorLastTs = 0.0
+$script:cursorSeen = [DateTime]::MinValue
+$script:cursorMoved = $false
 
 # Locate the active Virtual Display Driver monitor rect (physical pixels); cached 30s
 function Get-DshVddRect {
@@ -322,15 +369,34 @@ $timer.Add_Tick({
     } catch { }
   }
 
+  # AI virtual cursor freshness: same 3s hide window as the cursor overlay itself.
+  $script:cursorShow = $script:cursorShow -and (([DateTime]::Now - $script:cursorSeen).TotalMilliseconds -le 3000)
+  if (Test-Path $script:cursorFile) {
+    try {
+      $cs = Get-Content -Path $script:cursorFile -Raw -ErrorAction Stop | ConvertFrom-Json
+      if ($null -ne $cs -and $cs.ts -and ([double]$cs.ts -ne $script:cursorLastTs)) {
+        $script:cursorLastTs = [double]$cs.ts
+        $script:cursorSeen = [DateTime]::Now
+        $script:cursorX = [int][double]$cs.x
+        $script:cursorY = [int][double]$cs.y
+        $script:cursorShow = [bool]$cs.show
+        $script:cursorMoved = $true
+      }
+    } catch { }
+  }
+
   # Virtual display canvas mirror: when the helper parks windows on a real IddCx
   # virtual monitor, that desktop region is private to the AI — mirroring it is
   # always safe (never leaks the user's physical screen). Rendered in-place, no disk.
+  # A cursor state change forces an extra capture so the click point shows up fast.
   $script:tickCount++
-  if (-not $script:isMini -and $win.IsVisible -and (($script:tickCount % 4) -eq 0)) {
+  $wantMirror = ((($script:tickCount % 4) -eq 0) -or $script:cursorMoved)
+  if (-not $script:isMini -and $win.IsVisible -and $wantMirror) {
+    $script:cursorMoved = $false
     $vc = Get-DshVddRect
     if ($vc) {
       try {
-        $hBmp = [DshPipGdi]::CaptureRect($vc.x, $vc.y, $vc.w, $vc.h)
+        $hBmp = [DshPipGdi]::CaptureRectWithCursor($vc.x, $vc.y, $vc.w, $vc.h, $script:cursorX, $script:cursorY, $script:cursorShow)
         if ($hBmp -ne [IntPtr]::Zero) {
           $src = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHBitmap($hBmp, [IntPtr]::Zero, [System.Windows.Int32Rect]::Empty, [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
           $src.Freeze()

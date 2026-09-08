@@ -25,6 +25,9 @@ assert.ok(pipSrc.includes('Focusable="False"'), 'Must specify Focusable="False"'
 assert.ok(pipSrc.includes('[System.Windows.SystemParameters]::WorkArea'), 'Must use pure WPF SystemParameters for screen bounds')
 assert.ok(!pipSrc.includes('System.Drawing'), 'Must not import unused System.Drawing')
 assert.ok(pipSrc.includes('Live'), 'Must include Live status pill')
+assert.ok(pipSrc.includes('CaptureRectWithCursor'), 'Must composite the AI virtual cursor into the canvas mirror')
+assert.ok(pipSrc.includes('cursor.state'), 'Must read the AI virtual cursor state file')
+assert.ok(pipSrc.includes('Polygon') && pipSrc.includes('Ellipse'), 'Cursor glyph must be drawn with pure GDI, not System.Drawing')
 
 // 2. Verify computer-use-helper.ps1 and index.js
 const helperPath = path.join(repoDir, 'lib', 'computer-use-helper.ps1')
@@ -43,7 +46,7 @@ assert.ok(indexSrc.includes("'toggle_pip'") && indexSrc.includes("'isolate_windo
 // 3. Live runtime verification of pip-overlay.ps1
 const pwshCmd = `
 $pip = '${pipPath.replace(/'/g, "''")}'
-$proc = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File', $pip) -PassThru
+$proc = Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File', $pip) -WindowStyle Hidden -PassThru
 
 # Poll for window up to 3 seconds
 . '${helperPath.replace(/'/g, "''")}'
@@ -75,7 +78,8 @@ Write-Output "PIP_RUNTIME_VERIFIED_SUCCESS"
 `
 
 const res = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', pwshCmd], {
-  encoding: 'utf8'
+  encoding: 'utf8',
+  windowsHide: true,
 })
 
 if (res.stderr && res.stderr.trim()) {

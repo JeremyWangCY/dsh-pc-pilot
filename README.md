@@ -8,11 +8,11 @@ English | [中文](./README.zh.md)
 
 A **[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin** that gives the model a single `computer` tool to observe and operate the local Windows desktop: an indexed UIA accessibility tree, per-window screenshots, background synthetic-cursor input that never steals focus, and — when a task truly requires it — real SendInput mouse/keyboard control.
 
-While acting, the model moves a small **codex-style on-screen cursor** (a rounded arrow with a soft blue radial glow) to each target point, so a human can follow exactly what the AI is about to click or type. The cursor is click-through, never takes focus, and auto-hides three seconds after the last action.
+While acting, the model moves a small **on-screen cursor indicator** (a rounded arrow with a soft blue radial glow) to each target point, so a human can follow exactly what the AI is about to click or type. The cursor is click-through, never takes focus, and auto-hides three seconds after the last action.
 
 ## Features
 
-- **One tool, full desktop (28 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`.
+- **One tool, full desktop (30 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`; workspace additions: `toggle_pip`, `isolate_window`, `setup_virtual_display`.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
 - **Occlusion-immune background clicks** — with an `app` specified, coordinate clicks aim at the target window's own UIA tree / hwnd, so a fully covered window can be operated unattended while the user keeps working on top.
 - **Rich mouse vocabulary** — left / right / middle clicks, double-click (`click_count: 2`), triple-click (`click_count: 3`), and horizontal scrolling (`direction: "left" / "right"`).
@@ -22,7 +22,7 @@ While acting, the model moves a small **codex-style on-screen cursor** (a rounde
 - **Virtual-cursor indicator** — per-pixel-alpha layered window (`UpdateLayeredWindow` + `CreateDIBSection`): rounded white arrow with black outline over a soft blue radial glow. Click-through (`WS_EX_TRANSPARENT`), non-activating (`WS_EX_NOACTIVATE` + `SW_SHOWNOACTIVATE`), always-on-top. Auto-hides 3 s after the last action and reappears on the next one.
 - **High-DPI accurate** — the overlay calls `SetProcessDPIAware` at startup and positions itself in physical pixels, matching the physical coordinates the helper reports from UIA. Correct placement at 100% / 125% / 150% scaling.
 - **PowerShell 5.1 + 7 (Core) compatible** — the overlay adds the `System.Private.Windows.GdiPlus` / `System.Private.Windows.Core` references under .NET Core so both runtimes render the cursor identically.
-- **Zero setup** — no drivers, no admin rights. Everything runs through the Windows PowerShell helper that ships inside the package.
+- **Virtual display canvas, invisible to the user** — AI windows are parked on a real virtual monitor (IddCx virtual display): the OS renders them, the user never sees them, and the Apple-style picture-in-picture overlay mirrors the canvas live — with the AI's virtual cursor (white arrow + blue focus ring) composited into the mirror, so every click point stays visible to you. The driver is installed and activated automatically at the first host boot (one UAC click is the consent gate); the setup is idempotent and, once ready, never touches display hardware again (no primary-screen flicker).
 
 ## Requirements
 
@@ -39,7 +39,7 @@ Once listed, search for *dsh-pc-pilot* in the market and click install.
 ### From a GitHub release
 
 ```powershell
-pnpm add https://github.com/JeremyWangCY/PC-Pilot/releases/download/v0.1.0-beta.1/dsh-pc-pilot-0.1.0-beta.1.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.2.0/dsh-pc-pilot-0.2.0.tgz
 ```
 
 Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.
@@ -47,12 +47,42 @@ Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.
 ### From source
 
 ```powershell
-git clone https://github.com/JeremyWangCY/PC-Pilot.git
+git clone https://github.com/JeremyWangCY/dsh-pc-pilot.git
 cd dsh-pc-pilot
-pnpm add ./dsh-pc-pilot
+npm install ./dsh-pc-pilot
 ```
 
-Or link it manually: add `"dsh-pc-pilot": "link:./vendor/dsh-pc-pilot"` to the profile's `package.json` dependencies, add the bundle to `dsh.profile.bundles`, run `pnpm install`, and restart the host.
+Or link it manually: add `"dsh-pc-pilot": "link:./vendor/dsh-pc-pilot"` to the profile's `package.json` dependencies, add the bundle to `dsh.profile.bundles`, run `npm install`, and restart the host.
+
+### Virtual display setup (built-in, automatic)
+
+The virtual display is part of the plugin, not an add-on. After installation, the **first host boot finishes it automatically**:
+
+1. About 4 seconds after boot, the plugin runs an idempotent setup check in the background;
+2. If the driver is missing, it downloads the signed driver package (integrity double-verified by a pinned SHA256 and an Authenticode signature check; anything else aborts) and installs it silently — the single **UAC prompt** you approve is the only manual step;
+3. It applies the extended-display topology and calibrates the virtual monitor to the lowest supported tier (falls back from 1280×720 to 1366×768 @ 60Hz) — larger UI elements keep the picture-in-picture mirror readable at a glance;
+4. The result is written to `%TEMP%\dsh-cua-diag.log` (`virtual display ready: [status] ...`).
+
+Windows occasionally reverts programmatic topology changes on indirect displays — if that happens, press `Win+P` once and pick **Extend**; it never needs to be done again.
+
+Manual run / verification (same idempotent logic):
+
+```powershell
+npx dsh-pc-pilot       # or: npm run setup
+```
+
+The AI can do the same in-session:
+
+```jsonc
+computer { "action": "setup_virtual_display" }                       // install + activate
+computer { "action": "setup_virtual_display", "setup": "status" }    // status only
+```
+
+To uninstall the driver (the next host boot reinstalls it automatically):
+
+```powershell
+pnputil /delete-driver oem138.inf /uninstall /force
+```
 
 ## Usage
 
@@ -80,6 +110,8 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `open_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); pause between actions |
 | `activate_window` / `close_window` / `get_window` | Bring window to foreground / graceful WM_CLOSE / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
+| `toggle_pip` / `isolate_window` | Show/hide the PiP overlay; park or restore a window on the virtual display canvas |
+| `setup_virtual_display` | One-command virtual display setup (`setup`: auto / status / install / activate) |
 
 ### Key parameters
 
@@ -111,7 +143,7 @@ The helper is a single self-contained `computer-use-helper.ps1` copied to `%TEMP
 
 - The tool can read window titles, accessibility trees and screenshots, and can drive input into the user's applications. The bundled tool description instructs the model to operate **only** what the user explicitly asked for and to never submit forms, send messages, make purchases, delete data, or change account/settings without explicit instruction.
 - Background actions never move the user's cursor or steal focus. Foreground actions do — the guidance requires the model to say so.
-- No network access, no telemetry, no persistence beyond `%TEMP%\dsh-cua-*` state files.
+- No telemetry. The plugin itself performs no network access; the optional virtual-display setup downloads exactly one driver package, verified against a pinned SHA256 and an Authenticode signature before install. No persistence beyond `%TEMP%\dsh-cua-*` state files.
 
 ## Troubleshooting
 
@@ -119,11 +151,12 @@ The helper is a single self-contained `computer-use-helper.ps1` copied to `%TEMP
 - **The indicator is visible but misplaced** — ensure the installed version calls `SetProcessDPIAware` (all ≥ 0.1.0 builds do); mismatched DPI awareness shifts the overlay by the scaling factor.
 - **Desktop icons vanish / gray boxes appear** — this is a Windows shell (WorkerW) glitch typically caused by desktop-organizer or wallpaper tools, not by this plugin; restarting `explorer.exe` restores the desktop.
 - **`background_unavailable`** — the target has no background path (canvas, some WinUI/Chromium surfaces). Decide per task whether to go `foreground`. With an `app` specified, element and coordinate clicks fall back to the target-window WM path (occlusion-immune) instead of failing.
+- **Virtual display does not activate** — Windows may revert programmatic topology changes on indirect monitors. Press `Win+P` once and pick **Extend**, then re-run `npx dsh-pc-pilot` to verify. Without the driver the plugin automatically falls back to off-desktop parking.
 
 ## Development
 
 ```powershell
-git clone https://github.com/JeremyWangCY/PC-Pilot.git
+git clone https://github.com/JeremyWangCY/dsh-pc-pilot.git
 cd dsh-pc-pilot
 pwsh -File scripts/smoke-test.ps1
 ```
@@ -131,5 +164,8 @@ pwsh -File scripts/smoke-test.ps1
 The smoke test exercises helper actions (`list_apps`, `get_app_state`, background clicks) against a real window. To run the plugin from a local checkout, link it into a DSH profile as shown above.
 
 ## License
+
+[MIT](LICENSE)
+
 
 [MIT](LICENSE)

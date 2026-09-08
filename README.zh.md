@@ -13,7 +13,7 @@
 
 1. **看**：索引化的 UIA 无障碍树 + 逐窗口 PNG 截图——模型"读"到的是结构化元素列表（index / role / name / value / automation_id / rect / invokable），而不是靠视觉猜坐标；
 2. **动**：默认走**后台合成输入**（UIA 动作模式 → 像素命中测试 → 窗口消息），全程不抢焦点、不动你的真实鼠标键盘；
-3. **看得见**：每个动作执行前，屏幕上会出现一个 **codex 风格的虚拟光标**（圆润白色箭头 + 柔和蓝色径向光晕）移动到目标点——点击穿透、绝不取焦点，让人能实时看清 AI 正要做什么。
+3. **看得见**：每个动作执行前，屏幕上会出现一个**虚拟光标指示器**（圆润白色箭头 + 柔和蓝色径向光晕）移动到目标点——点击穿透、绝不取焦点，让人能实时看清 AI 正要做什么。
 
 需要真键鼠的场景（画布点击、不支持的拖拽等）可按任务切换 `dispatch: "foreground"`（真实 SendInput）。
 
@@ -21,7 +21,7 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 单工具全桌面（28 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait` |
+| 单工具全桌面（30 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait`；工作区扩展：`toggle_pip` / `isolate_window` / `setup_virtual_display` |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 丰富鼠标词汇 | 左 / 右 / 中键，双击（`click_count: 2`）、三击（`click_count: 3`），水平滚动（`direction: "left" / "right"`） |
@@ -32,7 +32,7 @@
 | 3 秒自动隐藏 | 最后一个动作 3 秒后光标自动消失（即 AI 本轮输出结束光标随之关闭），下一个动作再出现 |
 | 高 DPI 精确落点 | overlay 启动即调 `SetProcessDPIAware`，以物理像素定位，与 UIA 上报的物理坐标一致；100% / 125% / 150% 缩放下均准确 |
 | 双运行时兼容 | helper 恒以 PowerShell 5.1 运行（系统内置）；PowerShell 7 (Core) 下 overlay 渲染自动补齐 `System.Private.Windows.GdiPlus` / `System.Private.Windows.Core` 引用，两个运行时渲染一致 |
-| 零依赖零配置 | 唯一外部导入是 DSH 官方运行时自带的 `@deepseek-ai/dsh-tools`；无驱动、无需管理员权限 |
+| 虚拟副屏（完全式） | AI 窗口自动停泊在一块真实虚拟显示器（IddCx 驱动）上：OS 正常渲染、用户完全看不见、主屏零打扰；宿主首次启动时自动完成驱动安装与激活（UAC 弹窗即授权关卡，幂等不重复），画中画悬浮窗实时镜像工作区，AI 的虚拟光标（白箭头 + 蓝色焦点环）同步合成在镜像里，点击位置一目了然；就绪后 setup 绝不再触碰显示硬件（主屏零闪烁） |
 
 ## 环境要求
 
@@ -51,7 +51,7 @@
 在 DSH profile 目录（`~/.dsh/profiles/web`）内执行：
 
 ```powershell
-pnpm add https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.1.0-beta.1/dsh-pc-pilot-0.1.0-beta.1.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.2.0/dsh-pc-pilot-0.2.0.tgz
 ```
 
 确认 profile 的 `package.json` 中 `dsh.profile.bundles` 数组包含 `"dsh-pc-pilot"`（市场安装会自动加入；手动安装需自行添加），然后重启 DSH 宿主。
@@ -61,10 +61,40 @@ pnpm add https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.1.0-b
 ```powershell
 git clone https://github.com/JeremyWangCY/dsh-pc-pilot.git
 cd dsh-pc-pilot
-pnpm add ./dsh-pc-pilot
+npm install ./dsh-pc-pilot
 ```
 
-或者手动 link 调试：把仓库放到 profile 的 `vendor/` 下，在 profile `package.json` 的依赖中写 `"dsh-pc-pilot": "link:./vendor/dsh-pc-pilot"`，`dsh.profile.bundles` 中加入 `"dsh-pc-pilot"`，`pnpm install` 后重启宿主。
+或者手动 link 调试：把仓库放到 profile 的 `vendor/` 下，在 profile `package.json` 的依赖中写 `"dsh-pc-pilot": "link:./vendor/dsh-pc-pilot"`，`dsh.profile.bundles` 中加入 `"dsh-pc-pilot"`，`npm install` 后重启宿主。
+
+### 虚拟副屏安装（完全式，随插件自动完成）
+
+虚拟副屏是本插件的一部分，不是附加选项。插件安装完成后，**宿主首次启动时会自动完成驱动安装与激活**：
+
+1. 宿主启动约 4 秒后，插件在后台执行幂等安装检查；
+2. 驱动缺失时：自动下载已签名驱动包（内置下载源，SHA256 + Authenticode 双重校验，不符立即中止）并静默安装——此时弹出的 **UAC 授权框点一次【是】** 即为全部手动操作；
+3. 自动应用扩展拓扑并把虚拟屏校准到最低可用档（首选 1280×720，本机落点 1366×768 @ 60Hz）——分辨率更低、图标更大，画中画镜像一眼可辨；
+4. 就绪结果写入 `%TEMP%\dsh-cua-diag.log`（`virtual display ready: [status] ...`）。
+
+Windows 对间接显示器有确认回退机制，极少数情况下程序化扩展会被回退——此时按一次 `Win+P` 选【扩展】即可，之后不再需要。
+
+手动执行 / 验证（与自动安装同一套幂等逻辑）：
+
+```powershell
+npx dsh-pc-pilot       # 或在插件目录：npm run setup
+```
+
+也可以让 AI 自己完成或查询状态：
+
+```jsonc
+computer { "action": "setup_virtual_display" }                      // 自动安装+激活
+computer { "action": "setup_virtual_display", "setup": "status" }   // 只查状态
+```
+
+**卸载虚拟屏驱动**（不影响插件其余功能，但下次宿主启动会自动重新安装）：
+
+```powershell
+pnputil /delete-driver oem138.inf /uninstall /force
+```
 
 ### 验证安装
 
@@ -74,7 +104,11 @@ pnpm add ./dsh-pc-pilot
 [computer-use] computer tool registered globally (persistent profile plugin; helper at ...)
 ```
 
-即表示 `computer` 工具注册成功。
+即表示 `computer` 工具注册成功。虚拟屏是否就绪可随时查：
+
+```
+npx dsh-pc-pilot       # 输出 [status] 驱动=True 画布=1920,0,1920,1080 即就绪
+```
 
 ## 使用
 
@@ -164,7 +198,7 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 - **能力边界**：该工具可读取窗口标题、无障碍树与截图，并可向用户应用注入输入。内置工具指引明确要求模型**只操作用户 explicitly 要求**的应用与窗口，未经明确指示**绝不**提交表单、发送消息、下单购买、删除数据或更改账号/设置。
 - **最小干扰**：后台动作绝不移动真实光标、绝不抢焦点；foreground 动作会——指引要求模型必须先说明再做。
 - **无网络、无遥测**：插件不发起任何网络请求；除 `%TEMP%\dsh-cua-*` 状态与诊断文件外不做任何持久化。
-- **开源可审计**：全部逻辑就在 `lib/` 两个 PowerShell 文件和一个 JS 文件里，欢迎审阅。
+- **开源可审计**：全部逻辑就在 `lib/` 与 `bin/` 的几个 PowerShell / JS 文件里，欢迎审阅。
 
 ## 故障排查
 

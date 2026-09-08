@@ -1,28 +1,67 @@
 {
   "name": "dsh-pc-pilot",
-  "version": "0.1.0-beta.1",
-  "description": "PC-Pilot - Windows computer-use host plugin for DeepSeek Harness: UIA accessibility tree, PrintWindow screenshots, background synthetic-cursor input (UIA patterns / window messages) and real SendInput, with a codex-style on-screen cursor indicator.",
+  "version": "0.2.0",
+  "description": "PC-Pilot - DeepSeek Harness Windows 桌面操作插件：UIA 无障碍树、PrintWindow 截图、后台合成光标输入（UIA Pattern / 窗口消息）与真实 SendInput，AI 窗口可停泊在一块真实的虚拟显示器（IddCx Virtual Display Driver）上隐形运行，配合苹果风格画中画悬浮窗实时镜像工作区，一条命令即可完成虚拟屏安装。Windows computer-use host plugin for DeepSeek Harness: UIA accessibility tree, PrintWindow screenshots, background synthetic-cursor input (UIA patterns / window messages) and real SendInput, with AI windows parked on a real IddCx virtual display and an Apple-style PiP overlay mirroring it live.",
   "type": "module",
-  "scripts": {
-    "test": "node test/split-text.check.mjs && node test/native-fixes.check.mjs && node test/ipc-payload.check.mjs && node test/round4-hardening.check.mjs && node test/features.check.mjs && node test/parity.check.mjs && node test/element-cache.check.mjs && node test/cursor-render.check.mjs && node test/codex-parity.check.mjs && node test/fix-validation.check.mjs && node test/pip-overlay.check.mjs && node test/latency.check.mjs"
-  },
   "main": "lib/index.js",
+  "bin": {
+    "dsh-pc-pilot": "./bin/setup.mjs"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./package.json": "./package.json"
   },
+  "scripts": {
+    "setup": "node bin/setup.mjs",
+    "test": "node test/split-text.check.mjs && node test/native-fixes.check.mjs && node test/ipc-payload.check.mjs && node test/round4-hardening.check.mjs && node test/features.check.mjs && node test/parity.check.mjs && node test/element-cache.check.mjs && node test/cursor-render.check.mjs && node test/codex-parity.check.mjs && node test/fix-validation.check.mjs && node test/pip-overlay.check.mjs && node test/virtual-display.check.mjs && node test/latency.check.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dsh": ">=0.1.0-rc.5"
+    }
+  },
+  "dshhub": {
+    "schemaVersion": 1,
+    "displayName": "PC-Pilot 虚拟副屏",
+    "summary": "Windows 桌面操作：UIA 无障碍树 + 后台合成输入 + PrintWindow 截图，AI 窗口停泊在真实虚拟显示器上隐形运行、绝不打扰主屏，画中画实时镜像；一条命令完成虚拟屏安装。Windows computer-use with AI windows parked on a real virtual display.",
+    "categories": [
+      "桌面自动化",
+      "Windows",
+      "工具"
+    ],
+    "surfaces": [
+      "host"
+    ],
+    "capabilities": {
+      "provides": [
+        "tool:computer"
+      ]
+    },
+    "compatibility": {
+      "dsh": ">=0.1.0-rc.5",
+      "node": ">=22.12"
+    },
+    "permissions": {
+      "network": [
+        "https://github.com",
+        "https://objects.githubusercontent.com"
+      ]
     }
   },
   "files": [
+    "bin",
     "lib",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
   ],
   "keywords": [
     "deepseek",
-    "harness",
+    "deepseek-harness",
     "dsh",
     "dsh-plugin",
     "computer-use",
@@ -30,13 +69,16 @@
     "uia",
     "accessibility",
     "screenshot",
-    "automation"
+    "automation",
+    "virtual-display",
+    "picture-in-picture"
   ],
   "author": "JeremyWangCY",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JeremyWangCY/dsh-pc-pilot.git"
   },
+  "homepage": "https://github.com/JeremyWangCY/dsh-pc-pilot#readme",
   "os": [
     "win32"
   ],

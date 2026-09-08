@@ -935,7 +935,19 @@ function Ensure-OverlayProcess {
   }
   $ov = Join-Path $PSScriptRoot 'virtual-cursor-overlay.ps1'
   if (-not (Test-Path $ov)) { return }
-  Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"`"$ov`"") -WindowStyle Hidden | Out-Null
+  Start-HiddenPowershell -ScriptPath $ov | Out-Null
+}
+
+# start a headless powershell child; CreateNoWindow avoids the brief conhost
+# flash that Start-Process -WindowStyle Hidden can show on some machines
+function Start-HiddenPowershell {
+  param([string]$ScriptPath)
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  return [System.Diagnostics.Process]::Start($psi)
 }
 
 function Write-CursorState {
@@ -977,7 +989,7 @@ function Ensure-PipOverlayProcess {
   }
   $ov = Join-Path $PSScriptRoot 'pip-overlay.ps1'
   if (-not (Test-Path $ov)) { return }
-  $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"`"$ov`"") -WindowStyle Hidden -PassThru
+  $proc = Start-HiddenPowershell -ScriptPath $ov
   if ($proc) {
     try { [System.IO.File]::WriteAllText($pidFile, [string]$proc.Id, [System.Text.Encoding]::ASCII) } catch { }
   }
@@ -2940,6 +2952,23 @@ function Invoke-ActionRequest {
       }
     }
 
+
+    'setup_virtual_display' {
+      $stage = Get-PayloadValue 'setup'
+      $stageArg = if ($stage -in @('status','install','activate','auto')) { [string]$stage } else { 'auto' }
+      $scriptPath = Join-Path $PSScriptRoot 'setup-virtual-display.ps1'
+      if (-not (Test-Path $scriptPath)) { throw 'setup-virtual-display.ps1 not found next to the helper' }
+      $out = & $scriptPath -Action $stageArg 2>&1
+      $text = ($out | Out-String)
+      $m = [regex]::Match($text, 'DSHSETUP (\{.*\})')
+      if ($m.Success) {
+        try { $result.setup = $m.Groups[1].Value | ConvertFrom-Json } catch { }
+      }
+      $lines = @($text -split "`r?`n" | Where-Object { $_.Trim() -and -not $_.StartsWith('DSHSETUP') })
+      $result.message = ($lines | Select-Object -Last 5) -join ' | '
+      $result.ok = [bool]($result.setup -and $result.setup.ok)
+      if ($result.setup.needs_manual) { $result.needs_manual = $true }
+    }
 
     'toggle_pip' {
       $show = Get-PayloadValue 'show'

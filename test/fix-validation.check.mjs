@@ -194,7 +194,7 @@ try {
 
 } finally {
   if (notepadPid > 0) {
-    try { execSync(`taskkill /PID ${notepadPid} /F 2>nul || exit 0`, { timeout: 10000 }) } catch { /* ignore */ }
+    try { execSync(`taskkill /PID ${notepadPid} /F 2>nul || exit 0`, { timeout: 10000, windowsHide: true }) } catch { /* ignore */ }
   }
   stopDaemon()
 }

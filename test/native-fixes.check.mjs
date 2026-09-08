@@ -268,7 +268,7 @@ const parseCmd = `powershell -NoProfile -Command "
   if ($errs.Count -gt 0) { exit 2 }
   exit 0
 "`
-execSync(parseCmd, { stdio: 'inherit' })
+execSync(parseCmd, { stdio: 'inherit', windowsHide: true })
 
 // 8. Verification of C# compilation and bracket search behavior via PowerShell
 const testScript = `powershell -NoProfile -Command "
@@ -308,6 +308,6 @@ const testScript = `powershell -NoProfile -Command "
 
   exit 0
 "`
-execSync(testScript, { stdio: 'inherit' })
+execSync(testScript, { stdio: 'inherit', windowsHide: true })
 
 console.log('native-fixes check PASSED')

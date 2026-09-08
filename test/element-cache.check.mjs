@@ -59,7 +59,7 @@ try {
   assert.ok(durationMs < 600, `cached click_element took ${Math.round(durationMs)}ms; expected well under the full-rescan baseline (loose 600ms cap)`)
 } finally {
   // cleanup scratch notepad regardless of outcome
-  if (notepadPid > 0) { try { execSync(`taskkill /PID ${notepadPid} /F`, { timeout: 10000 }) } catch { /* already gone */ } }
+  if (notepadPid > 0) { try { execSync(`taskkill /PID ${notepadPid} /F`, { timeout: 10000, windowsHide: true }) } catch { /* already gone */ } }
   stopDaemon()
 }
 
