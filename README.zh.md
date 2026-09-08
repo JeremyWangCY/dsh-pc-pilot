@@ -21,7 +21,7 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 单工具全桌面（25 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait` |
+| 单工具全桌面（28 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait` |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 丰富鼠标词汇 | 左 / 右 / 中键，双击（`click_count: 2`）、三击（`click_count: 3`），水平滚动（`direction: "left" / "right"`） |
@@ -94,7 +94,7 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 // 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_app_state 有效）
 ```
 
-### 动作参考（25 个动作）
+### 动作参考（28 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
@@ -105,13 +105,14 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 | `type` | 逐字输入文本；可指定 `element` 定向投递 | `app`?、`text`、`element`? |
 | `perform_action` | 对元素执行命名 UIA 动作（invoke / toggle / select / expand / collapse / focus / scroll_*） | `app`、`element`、`perform` |
 | `select_text` | 选中元素文本范围（TextPattern）；`length: 0` 仅定位光标 | `app`、`element`、`start`、`length` |
-| `key` / `hold_key` | 按键 / 定时按住 | `app`?、`key`、`modifiers`、`duration_ms` |
+| `key` / `hold_key` | 按键与组合键 Chords（支持 `Control_L+a`、`ctrl+c`、`alt+f4`、`ctrl+shift+p` 等） / 定时按住 | `app`?、`key`、`modifiers`?、`duration_ms` |
 | `scroll` | 垂直与水平滚动 | `app`?、`x`、`y`、`amount`、`direction`（down/up/left/right） |
 | `mouse_move` / `mouse_down` / `mouse_up` | 原始鼠标原语（悬停 / 按下 / 抬起） | `app`?、`x`、`y`、`button` |
 | `drag` | 拖拽（后台走 TransformPattern，前台真实 SendInput） | `app`?、`from_x`、`from_y`、`to_x`、`to_y` |
 | `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |
 | `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
-| `open_app` / `wait` | 启动应用 / 动作间等待 | `name` / `duration_s` |
+| `open_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点） / 动作间等待 | `name` / `duration_s` |
+| `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
 
 > `app` 可以是 pid 数字、进程名或窗口标题子串；一个进程有多个窗口时用 `window_index`（1 起）消歧。

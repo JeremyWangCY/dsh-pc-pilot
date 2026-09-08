@@ -139,9 +139,9 @@ const openAppStart = helperSrc.indexOf("'open_app' {")
 const openAppEnd = helperSrc.indexOf('default {', openAppStart)
 const openAppBody = helperSrc.slice(openAppStart, openAppEnd)
 assert.match(openAppBody, /Split-AppCommand -Name/, 'open_app must split name via Split-AppCommand')
-assert.match(openAppBody, /Start-Process -FilePath \$filePath -ArgumentList \$argList -PassThru/,
+assert.match(openAppBody, /Start-Process -FilePath \$filePath -ArgumentList \$argList.*?-PassThru/,
   'open_app must pass ArgumentList when arguments are present')
-assert.match(openAppBody, /Start-Process -FilePath \$filePath -PassThru/,
+assert.match(openAppBody, /Start-Process -FilePath \$filePath.*?-PassThru/,
   'open_app must still support argument-less launches')
 
 // ---------------------------------------------------------------- 4. Split-AppCommand behavior (PowerShell)

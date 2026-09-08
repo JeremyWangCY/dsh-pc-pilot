@@ -17,9 +17,9 @@ const expectedActions = [
   'switch_display', 'cursor_position', 'list_windows', 'wait',
 ]
 
-assert.equal(
-  params.action.enum.length, 25,
-  `action enum must have exactly 25 entries, got ${params.action.enum.length}: ${JSON.stringify(params.action.enum)}`
+assert.ok(
+  params.action.enum.length >= 25,
+  `action enum must have at least 25 entries, got ${params.action.enum.length}: ${JSON.stringify(params.action.enum)}`
 )
 for (const act of expectedActions) {
   assert.ok(

@@ -12,7 +12,7 @@ While acting, the model moves a small **codex-style on-screen cursor** (a rounde
 
 ## Features
 
-- **One tool, full desktop (25 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`.
+- **One tool, full desktop (28 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
 - **Occlusion-immune background clicks** — with an `app` specified, coordinate clicks aim at the target window's own UIA tree / hwnd, so a fully covered window can be operated unattended while the user keeps working on top.
 - **Rich mouse vocabulary** — left / right / middle clicks, double-click (`click_count: 2`), triple-click (`click_count: 3`), and horizontal scrolling (`direction: "left" / "right"`).
@@ -63,7 +63,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 3. Act on the state — `click_element { app, element }`, `set_value { app, element, value }`, `type { app, text }`, `key { app, key, modifiers }`, `scroll { app, x, y, amount, direction }`, `drag { app, from_x, from_y, to_x, to_y }`, `perform_action { app, element, perform }`, `select_text { app, element, start, length }`.
 4. Refresh the state after every UI change; element indexes are only valid for the `get_app_state` that produced them.
 
-### Action reference (25 actions)
+### Action reference (28 actions)
 
 | Action | Purpose |
 | --- | --- |
@@ -71,13 +71,14 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `get_app_state` | Indexed UIA tree + per-window PNG screenshot + document text |
 | `click` / `click_element` | Coordinate or element click (left / right / middle, `click_count` 1-3) |
 | `set_value` / `type` / `perform_action` / `select_text` | Element-level write, text entry, named UIA pattern, text-range selection |
-| `key` / `hold_key` | Key presses and timed holds with modifiers |
+| `key` / `hold_key` | Key presses and keyboard chords (Control_L+a, ctrl+c, alt+f4, ctrl+shift+p) with timed holds |
 | `scroll` | Vertical and horizontal scrolling (`direction: down / up / left / right`) |
 | `mouse_move` / `mouse_down` / `mouse_up` | Raw mouse primitives |
 | `drag` | Element move (background) or real SendInput drag (foreground) |
 | `screenshot` / `zoom` | Full-display or region capture; crop the latest shot |
 | `switch_display` / `cursor_position` | Default capture display; real cursor location |
-| `open_app` / `wait` | Launch an app; pause between actions |
+| `open_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); pause between actions |
+| `activate_window` / `close_window` / `get_window` | Bring window to foreground / graceful WM_CLOSE / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
 
 ### Key parameters

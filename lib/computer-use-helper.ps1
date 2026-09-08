@@ -59,6 +59,7 @@ public static class DshWin32
     public string Title;
     public bool Visible;
     public bool Foreground;
+    public bool Minimized;
     public RECT Rect;
   }
 
@@ -104,6 +105,137 @@ public static class DshWin32
   [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
   [DllImport("user32.dll")] public static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool LockSetForegroundWindow(uint uCode);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+  public static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
+  public static readonly IntPtr HWND_TOP = new IntPtr(0);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  public const uint SWP_NOSIZE = 0x0001;
+  public const uint SWP_NOMOVE = 0x0002;
+  public const uint SWP_NOACTIVATE = 0x0010;
+  public const uint SWP_SHOWWINDOW = 0x0040;
+  public const uint LSFW_LOCK = 1;
+  public const uint LSFW_UNLOCK = 2;
+  public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+  public const uint WM_CLOSE = 0x0010;
+  public const int SW_SHOWNOACTIVATE = 4;
+  public const int STARTF_USESHOWWINDOW = 0x00000001;
+  public const uint SEE_MASK_NOCLOSEPROCESS = 0x00000040;
+
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct SHELLEXECUTEINFO
+  {
+    public int cbSize;
+    public uint fMask;
+    public IntPtr hwnd;
+    public string lpVerb;
+    public string lpFile;
+    public string lpParameters;
+    public string lpDirectory;
+    public int nShow;
+    public IntPtr hInstApp;
+    public IntPtr lpIDList;
+    public string lpClass;
+    public IntPtr hkeyClass;
+    public uint dwHotKey;
+    public IntPtr hIconOrMonitor;
+    public IntPtr hProcess;
+  }
+
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern bool ShellExecuteExW(ref SHELLEXECUTEINFO lpExecInfo);
+
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct STARTUPINFO
+  {
+    public int cb;
+    public string lpReserved;
+    public string lpDesktop;
+    public string lpTitle;
+    public int dwX;
+    public int dwY;
+    public int dwXSize;
+    public int dwYSize;
+    public int dwXCountChars;
+    public int dwYCountChars;
+    public int dwFillAttribute;
+    public int dwFlags;
+    public ushort wShowWindow;
+    public ushort cbReserved2;
+    public IntPtr lpReserved2;
+    public IntPtr hStdInput;
+    public IntPtr hStdOutput;
+    public IntPtr hStdError;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PROCESS_INFORMATION
+  {
+    public IntPtr hProcess;
+    public IntPtr hThread;
+    public uint dwProcessId;
+    public uint dwThreadId;
+  }
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern bool CreateProcessW(
+    string lpApplicationName,
+    string lpCommandLine,
+    IntPtr lpProcessAttributes,
+    IntPtr lpThreadAttributes,
+    bool bInheritHandles,
+    uint dwCreationFlags,
+    IntPtr lpEnvironment,
+    string lpCurrentDirectory,
+    ref STARTUPINFO lpStartupInfo,
+    out PROCESS_INFORMATION lpProcessInformation);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  public static extern uint GetProcessId(IntPtr hProcess);
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  public static extern bool CloseHandle(IntPtr hObject);
+
+  public static uint LaunchShellSilent(string file, string args)
+  {
+    SHELLEXECUTEINFO sei = new SHELLEXECUTEINFO();
+    sei.cbSize = Marshal.SizeOf(typeof(SHELLEXECUTEINFO));
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = "open";
+    sei.lpFile = file;
+    sei.lpParameters = string.IsNullOrEmpty(args) ? null : args;
+    sei.nShow = SW_SHOWNOACTIVATE;
+    if (ShellExecuteExW(ref sei))
+    {
+      uint pid = 0;
+      if (sei.hProcess != IntPtr.Zero)
+      {
+        pid = GetProcessId(sei.hProcess);
+        CloseHandle(sei.hProcess);
+      }
+      return pid;
+    }
+    return 0;
+  }
+
+  public static uint LaunchProcessSilent(string appName, string cmdLine)
+  {
+    STARTUPINFO si = new STARTUPINFO();
+    si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = (ushort)SW_SHOWNOACTIVATE;
+    PROCESS_INFORMATION pi = new PROCESS_INFORMATION();
+    if (CreateProcessW(appName, cmdLine, IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, null, ref si, out pi))
+    {
+      uint pid = pi.dwProcessId;
+      if (pi.hProcess != IntPtr.Zero) CloseHandle(pi.hProcess);
+      if (pi.hThread != IntPtr.Zero) CloseHandle(pi.hThread);
+      return pid;
+    }
+    return 0;
+  }
 
   public static POINT ScreenToClientPoint(IntPtr hWnd, int sx, int sy)
   {
@@ -132,6 +264,49 @@ public static class DshWin32
     }
   }
 
+  public static RECT GetDwmRect(IntPtr h)
+  {
+    RECT r;
+    try
+    {
+      if (DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, out r, Marshal.SizeOf(typeof(RECT))) == 0)
+      {
+        if (r.Right > r.Left && r.Bottom > r.Top) return r;
+      }
+    }
+    catch { }
+    GetWindowRect(h, out r);
+    return r;
+  }
+
+  public static bool CloseWindowGracefully(IntPtr h, uint timeoutMs = 3000)
+  {
+    IntPtr res;
+    IntPtr ret = SendMessageTimeout(h, WM_CLOSE, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, timeoutMs, out res);
+    return ret != IntPtr.Zero;
+  }
+
+  public static bool PushWindowToBottom(IntPtr h)
+  {
+    return SetWindowPos(h, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  }
+
+  public static WinInfo GetWinInfo(IntPtr h)
+  {
+    uint pid; GetWindowThreadProcessId(h, out pid);
+    StringBuilder sb = new StringBuilder(512);
+    GetWindowText(h, sb, 512);
+    RECT r = GetDwmRect(h);
+    IntPtr fg = GetForegroundWindow();
+    bool isMin = IsIconic(h);
+    WinInfo wi = new WinInfo();
+    wi.Hwnd = h; wi.Pid = pid; wi.Title = sb.ToString();
+    wi.Visible = IsWindowVisible(h); wi.Foreground = (!isMin && h == fg);
+    wi.Minimized = isMin;
+    wi.Rect = r;
+    return wi;
+  }
+
   public static List<WinInfo> EnumWindowsList()
   {
     List<WinInfo> list = new List<WinInfo>();
@@ -139,26 +314,28 @@ public static class DshWin32
     EnumWindows(delegate(IntPtr h, IntPtr l)
     {
       if (!IsWindowVisible(h)) return true;
-      RECT r; GetWindowRect(h, out r);
-      if (r.Right - r.Left <= 0 || r.Bottom - r.Top <= 0) return true;
+      bool isMin = IsIconic(h);
+      RECT r = GetDwmRect(h);
+      if (!isMin && (r.Right - r.Left <= 0 || r.Bottom - r.Top <= 0)) return true;
       uint pid; GetWindowThreadProcessId(h, out pid);
       StringBuilder sb = new StringBuilder(512);
       GetWindowText(h, sb, 512);
       WinInfo wi = new WinInfo();
       wi.Hwnd = h; wi.Pid = pid; wi.Title = sb.ToString(); wi.Visible = true;
-      wi.Foreground = (h == fg); wi.Rect = r;
+      wi.Foreground = (!isMin && h == fg); wi.Minimized = isMin; wi.Rect = r;
       list.Add(wi);
       return true;
     }, IntPtr.Zero);
     return list;
   }
 
-  public static RECT GetRect(IntPtr h) { RECT r; GetWindowRect(h, out r); return r; }
+  public static RECT GetRect(IntPtr h) { return GetDwmRect(h); }
 
   public static void ForceForeground(IntPtr h)
   {
     // only restore MINIMIZED windows; never SW_RESTORE a visible/maximized window (would un-maximize it)
     if (IsIconic(h)) ShowWindow(h, 9);
+    SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     INPUT[] alt = new INPUT[] { MkKey(0x12, 0), MkKey(0x12, 2) };
     SendInput(2, alt, Marshal.SizeOf(typeof(INPUT)));
     System.Threading.Thread.Sleep(40);
@@ -169,11 +346,14 @@ public static class DshWin32
     // GetWindowThreadProcessId RETURNS the thread id; the out param receives the process id.
     uint fgPid; uint fgTid = GetWindowThreadProcessId(f, out fgPid);
     uint curPid; uint curTid = GetWindowThreadProcessId(h, out curPid);
+    uint myTid = GetCurrentThreadId();
+    if (myTid != 0 && fgTid != 0 && myTid != fgTid) AttachThreadInput(myTid, fgTid, true);
     if (fgTid != 0 && curTid != 0 && fgTid != curTid) AttachThreadInput(curTid, fgTid, true);
     BringWindowToTop(h);
     SetForegroundWindow(h);
     SetFocus(h);
     if (fgTid != 0 && curTid != 0 && fgTid != curTid) AttachThreadInput(curTid, fgTid, false);
+    if (myTid != 0 && fgTid != 0 && myTid != fgTid) AttachThreadInput(myTid, fgTid, false);
     System.Threading.Thread.Sleep(150);
   }
 
@@ -240,17 +420,24 @@ public static class DshWin32
       case "printscreen": case "prtsc": return 0x2C;
       case "scrolllock": return 0x91;
       case "pause": case "break": return 0x13;
-      case "shift": return 0x10;
-      case "ctrl": case "control": return 0x11;
-      case "alt": return 0x12;
-      case "win": case "meta": case "super": return 0x5B;
+      case "shift": case "shift_l": case "shift_r": return 0x10;
+      case "ctrl": case "control": case "control_l": case "control_r": case "ctrl_l": case "ctrl_r": return 0x11;
+      case "alt": case "alt_l": case "alt_r": case "option": case "option_l": case "option_r": return 0x12;
+      case "win": case "meta": case "super": case "cmd": case "command": return 0x5B;
+      case "period": case "dot": return 0xBE;
+      case "comma": return 0xBC;
+      case "semicolon": return 0xBA;
+      case "slash": return 0xBF;
+      case "backslash": return 0xDC;
+      case "minus": case "dash": return 0xBD;
+      case "plus": return 0xBB;
     }
     if (k.Length == 1)
     {
       char c = k[0];
       if (c >= 'a' && c <= 'z') return (ushort)(0x41 + (c - 'a'));
       if (c >= '0' && c <= '9') return (ushort)(0x30 + (c - '0'));
-      if (c == '-') return 0xBD; if (c == '=') return 0xBB;
+      if (c == '-') return 0xBD; if (c == '=' || c == '+') return 0xBB;
       if (c == '[') return 0xDB; if (c == ']') return 0xDD;
       if (c == '\\') return 0xDC; if (c == ';') return 0xBA;
       if (c == '\'') return 0xDE; if (c == ',') return 0xBC;
@@ -264,22 +451,65 @@ public static class DshWin32
     return 0;
   }
 
-  public static void KeyChord(string key, string modifiers)
+  private static ushort MapModKey(string m)
   {
-    ushort vk = MapKey(key);
-    if (vk == 0) throw new Exception("unknown key: " + key);
-    List<ushort> mods = new List<ushort>();
-    if (!string.IsNullOrEmpty(modifiers))
+    if (string.IsNullOrEmpty(m)) return 0;
+    m = m.Trim().ToLowerInvariant();
+    if (m == "ctrl" || m == "control" || m == "control_l" || m == "control_r" || m == "ctrl_l" || m == "ctrl_r") return 0x11;
+    if (m == "shift" || m == "shift_l" || m == "shift_r") return 0x10;
+    if (m == "alt" || m == "alt_l" || m == "alt_r" || m == "option" || m == "option_l" || m == "option_r") return 0x12;
+    if (m == "win" || m == "meta" || m == "super" || m == "cmd" || m == "command") return 0x5B;
+    return 0;
+  }
+
+  public static void ParseChord(string rawKey, string rawMods, out string baseKey, out List<ushort> modVks)
+  {
+    List<ushort> resMods = new List<ushort>();
+    if (!string.IsNullOrEmpty(rawMods))
     {
-      foreach (string part in modifiers.Split(new char[] { ',', '+' }, StringSplitOptions.RemoveEmptyEntries))
+      foreach (string part in rawMods.Split(new char[] { ',', '+' }, StringSplitOptions.RemoveEmptyEntries))
       {
-        string m = part.Trim().ToLowerInvariant();
-        if (m == "ctrl" || m == "control") mods.Add(0x11);
-        else if (m == "shift") mods.Add(0x10);
-        else if (m == "alt") mods.Add(0x12);
-        else if (m == "win" || m == "meta" || m == "super") mods.Add(0x5B);
+        ushort vk = MapModKey(part);
+        if (vk != 0 && !resMods.Contains(vk)) resMods.Add(vk);
       }
     }
+    baseKey = rawKey != null ? rawKey.Trim() : "";
+    if (baseKey.Length > 1 && baseKey.Contains("+"))
+    {
+      if (baseKey.EndsWith("++"))
+      {
+        string pfx = baseKey.Substring(0, baseKey.Length - 2);
+        string[] parts = pfx.Split(new char[] { '+' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (string p in parts)
+        {
+          ushort vk = MapModKey(p);
+          if (vk != 0 && !resMods.Contains(vk)) resMods.Add(vk);
+        }
+        baseKey = "+";
+      }
+      else
+      {
+        string[] parts = baseKey.Split(new char[] { '+' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length > 1)
+        {
+          for (int i = 0; i < parts.Length - 1; i++)
+          {
+            ushort vk = MapModKey(parts[i]);
+            if (vk != 0 && !resMods.Contains(vk)) resMods.Add(vk);
+          }
+          baseKey = parts[parts.Length - 1];
+        }
+      }
+    }
+    modVks = resMods;
+  }
+
+  public static void KeyChord(string key, string modifiers)
+  {
+    string baseKey; List<ushort> mods;
+    ParseChord(key, modifiers, out baseKey, out mods);
+    ushort vk = MapKey(baseKey);
+    if (vk == 0) throw new Exception("unknown key: " + baseKey);
     List<INPUT> ev = new List<INPUT>();
     foreach (ushort m in mods) ev.Add(MkKey(m, 0));
     ev.Add(MkKey(vk, 0));
@@ -374,20 +604,10 @@ public static class DshWin32
 
   public static void HoldKey(string key, string modifiers, int durationMs)
   {
-    ushort vk = MapKey(key);
-    if (vk == 0) throw new Exception("unknown key: " + key);
-    List<ushort> mods = new List<ushort>();
-    if (!string.IsNullOrEmpty(modifiers))
-    {
-      foreach (string part in modifiers.Split(new char[] { ',', '+' }, StringSplitOptions.RemoveEmptyEntries))
-      {
-        string m = part.Trim().ToLowerInvariant();
-        if (m == "ctrl" || m == "control") mods.Add(0x11);
-        else if (m == "shift") mods.Add(0x10);
-        else if (m == "alt") mods.Add(0x12);
-        else if (m == "win" || m == "meta" || m == "super") mods.Add(0x5B);
-      }
-    }
+    string baseKey; List<ushort> mods;
+    ParseChord(key, modifiers, out baseKey, out mods);
+    ushort vk = MapKey(baseKey);
+    if (vk == 0) throw new Exception("unknown key: " + baseKey);
     List<INPUT> down = new List<INPUT>();
     foreach (ushort m in mods) down.Add(MkKey(m, 0));
     down.Add(MkKey(vk, 0));
@@ -429,6 +649,19 @@ function Get-OverlayEnabled {
   return [bool]$o
 }
 
+function Get-ProcessNameFast {
+  param([uint32]$ProcessId, [hashtable]$Cache)
+  if ($null -ne $Cache -and $Cache.ContainsKey($ProcessId)) { return $Cache[$ProcessId] }
+  $name = $null
+  try {
+    $p = [System.Diagnostics.Process]::GetProcessById([int]$ProcessId)
+    $name = $p.ProcessName
+  } catch { }
+  if (-not $name) { $name = "pid:$ProcessId" }
+  if ($null -ne $Cache) { $Cache[$ProcessId] = $name }
+  return $name
+}
+
 function Get-CandidateWindows {
   # Shared candidate filtering for Resolve-TargetWindow and list_windows:
   # matches pid / window-title substring / process name, drops off-screen ghosts.
@@ -446,8 +679,7 @@ function Get-CandidateWindows {
         $names = @{}
         foreach ($w in $wins) {
           if (-not $names.ContainsKey($w.Pid)) {
-            $p = Get-Process -Id $w.Pid -ErrorAction SilentlyContinue
-            $names[$w.Pid] = if ($p) { $p.ProcessName } else { '' }
+            $names[$w.Pid] = Get-ProcessNameFast -ProcessId $w.Pid -Cache $names
           }
         }
         $filtered = @($wins | Where-Object { $names[$_.Pid] -ieq $App })
@@ -456,28 +688,129 @@ function Get-CandidateWindows {
   }
 
   return @($filtered | Where-Object {
-    $_.Rect.Left -ge -10000 -and $_.Rect.Top -ge -10000 -and
-    ($_.Rect.Right - $_.Rect.Left) -ge 50 -and
-    ($_.Rect.Bottom - $_.Rect.Top) -ge 32
+    $_.Minimized -or (
+      $_.Rect.Left -ge -10000 -and $_.Rect.Top -ge -10000 -and
+      ($_.Rect.Right - $_.Rect.Left) -ge 50 -and
+      ($_.Rect.Bottom - $_.Rect.Top) -ge 32
+    )
   })
 }
 
 function Resolve-TargetWindow {
-  param([string]$App, [int]$Index)
-  $cand = Get-CandidateWindows -App $App
-  if ($cand.Count -eq 0) { throw "app_not_found: $App" }
-  if ($Index -gt 0) {
-    $idx = [Math]::Min($Index, $cand.Count) - 1
-  } else {
-    $best = 0
-    $bestArea = -1
-    for ($i = 0; $i -lt $cand.Count; $i++) {
-      $area = ($cand[$i].Rect.Right - $cand[$i].Rect.Left) * ($cand[$i].Rect.Bottom - $cand[$i].Rect.Top)
-      if ($area -gt $bestArea) { $bestArea = $area; $best = $i }
-    }
-    $idx = $best
+  param([string]$App, [int]$Index, [int64]$Hwnd = 0)
+  if (-not $Hwnd) {
+    $hVal = Get-PayloadValue 'hwnd'
+    if ($hVal) { $Hwnd = [int64]$hVal }
   }
-  return $cand[$idx]
+  $target = $null
+  if ($Hwnd -gt 0) {
+    $wins = @([DshWin32]::EnumWindowsList())
+    $found = @($wins | Where-Object { $_.Hwnd.ToInt64() -eq $Hwnd })
+    if ($found.Count -gt 0) { $target = $found[0] }
+    elseif ([DshWin32]::IsWindow([IntPtr]$Hwnd)) {
+      $target = [DshWin32]::GetWinInfo([IntPtr]$Hwnd)
+    } else {
+      throw "window_not_found: hwnd $Hwnd"
+    }
+  } else {
+    $cand = Get-CandidateWindows -App $App
+    if ($cand.Count -eq 0) { throw "app_not_found: $App" }
+    if ($Index -gt 0) {
+      $idx = [Math]::Min($Index, $cand.Count) - 1
+    } else {
+      $best = 0
+      $bestArea = -1
+      for ($i = 0; $i -lt $cand.Count; $i++) {
+        $area = ($cand[$i].Rect.Right - $cand[$i].Rect.Left) * ($cand[$i].Rect.Bottom - $cand[$i].Rect.Top)
+        if ($area -gt $bestArea) { $bestArea = $area; $best = $i }
+      }
+      $idx = $best
+    }
+    $target = $cand[$idx]
+  }
+
+  # If target is iconic (minimized) and action is not read-only inspection (get_window),
+  # silently unminimize with SW_SHOWNOACTIVATE so rect and UIA are valid without stealing focus
+  if ($null -ne $target -and [DshWin32]::IsIconic($target.Hwnd)) {
+    $currAct = Get-PayloadValue 'action'
+    if ($currAct -notin @('get_window', 'list_windows')) {
+      $prevFg = [DshWin32]::GetForegroundWindow()
+      [DshWin32]::ShowWindow($target.Hwnd, 4) | Out-Null
+      [DshWin32]::PushWindowToBottom($target.Hwnd) | Out-Null
+      if ($prevFg -ne [IntPtr]::Zero -and [DshWin32]::GetForegroundWindow() -ne $prevFg) {
+        try { [DshWin32]::ForceForeground($prevFg) } catch { }
+      }
+      $target.Rect = [DshWin32]::GetDwmRect($target.Hwnd)
+      $target.Minimized = $false
+    }
+  }
+
+  return $target
+}
+
+function Parse-KeyChord {
+  param([string]$RawKey, [string]$RawModifiers)
+  if (-not $RawKey) { return @{ Key = ''; Modifiers = $RawModifiers } }
+  $k = $RawKey.Trim()
+  $mods = New-Object System.Collections.Generic.List[string]
+  if ($RawModifiers) {
+    foreach ($m in ($RawModifiers -split '[,+]')) {
+      $mt = $m.Trim().ToLowerInvariant()
+      if ($mt) { $mods.Add($mt) }
+    }
+  }
+
+  $baseKey = $k
+  if ($k.Length -gt 1 -and $k.Contains('+')) {
+    $tokens = New-Object System.Collections.Generic.List[string]
+    if ($k.EndsWith('++')) {
+      $pfx = $k.Substring(0, $k.Length - 2)
+      foreach ($p in ($pfx -split '\+')) { if ($p.Trim()) { $tokens.Add($p.Trim()) } }
+      $tokens.Add('+')
+    } else {
+      foreach ($p in ($k -split '\+')) { if ($p.Trim()) { $tokens.Add($p.Trim()) } }
+    }
+    if ($tokens.Count -gt 1) {
+      $baseKey = $tokens[$tokens.Count - 1]
+      for ($i = 0; $i -lt $tokens.Count - 1; $i++) {
+        $mods.Add($tokens[$i].ToLowerInvariant())
+      }
+    }
+  }
+
+  $normMods = New-Object System.Collections.Generic.List[string]
+  foreach ($m in $mods) {
+    $norm = switch -Regex ($m) {
+      '^(ctrl|control|control_l|control_r|ctrl_l|ctrl_r)$' { 'ctrl' }
+      '^(shift|shift_l|shift_r)$' { 'shift' }
+      '^(alt|alt_l|alt_r|option|option_l|option_r)$' { 'alt' }
+      '^(win|meta|super|cmd|command)$' { 'win' }
+      default { $m }
+    }
+    if (-not $normMods.Contains($norm)) { $normMods.Add($norm) }
+  }
+
+  $bkLower = $baseKey.ToLowerInvariant()
+  $normBase = switch ($bkLower) {
+    { $_ -in 'return', 'enter' } { 'return' }
+    { $_ -in 'esc', 'escape' } { 'escape' }
+    { $_ -in 'space', 'spacebar' } { 'space' }
+    { $_ -in 'period', 'dot' } { '.' }
+    'comma' { ',' }
+    'semicolon' { ';' }
+    'slash' { '/' }
+    'backslash' { '\' }
+    { $_ -in 'minus', 'dash' } { '-' }
+    { $_ -in 'control_l', 'control_r', 'ctrl_l', 'ctrl_r' } { 'ctrl' }
+    { $_ -in 'alt_l', 'alt_r' } { 'alt' }
+    { $_ -in 'shift_l', 'shift_r' } { 'shift' }
+    default { $baseKey }
+  }
+
+  return @{
+    Key = $normBase
+    Modifiers = ($normMods -join ',')
+  }
 }
 
 function Get-WindowInfo {
@@ -487,6 +820,7 @@ function Get-WindowInfo {
     pid = $Win.Pid
     title = $Win.Title
     foreground = $Win.Foreground
+    minimized = [bool]$Win.Minimized
     rect = @{ x = $Win.Rect.Left; y = $Win.Rect.Top; width = ($Win.Rect.Right - $Win.Rect.Left); height = ($Win.Rect.Bottom - $Win.Rect.Top) }
   }
 }
@@ -500,9 +834,12 @@ function Safe-Int {
 }
 
 function Get-AccessibilityTree {
-  param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS)
+  param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS, $WinRect = $null)
   $script:cachedTreeHwnd = $Hwnd
   $script:cachedElements = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
+  if ($null -eq $WinRect -and $Hwnd -ne [IntPtr]::Zero) {
+    try { $WinRect = [DshWin32]::GetRect($Hwnd) } catch { }
+  }
   $aeRoot = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
   $children = $aeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
   $out = New-Object System.Collections.Generic.List[object]
@@ -524,6 +861,8 @@ function Get-AccessibilityTree {
     $invoke = $false
     $ip = $null
     if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) { $invoke = $true }
+    $relX = if ($null -ne $WinRect) { Safe-Int ($rect.X - $WinRect.Left) } else { Safe-Int $rect.X }
+    $relY = if ($null -ne $WinRect) { Safe-Int ($rect.Y - $WinRect.Top) } else { Safe-Int $rect.Y }
     $item = [ordered]@{
       index = $count
       role = $cur.ControlType.ProgrammaticName
@@ -533,7 +872,8 @@ function Get-AccessibilityTree {
       enabled = $cur.IsEnabled
       offscreen = $cur.IsOffscreen
       invokable = $invoke
-      rect = @{ x = (Safe-Int $rect.X); y = (Safe-Int $rect.Y); width = (Safe-Int $rect.Width); height = (Safe-Int $rect.Height) }
+      rect = @{ x = $relX; y = $relY; width = (Safe-Int $rect.Width); height = (Safe-Int $rect.Height) }
+      screen_rect = @{ x = (Safe-Int $rect.X); y = (Safe-Int $rect.Y); width = (Safe-Int $rect.Width); height = (Safe-Int $rect.Height) }
     }
     $out.Add($item)
   }
@@ -609,7 +949,15 @@ function Write-CursorState {
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
   $ts = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
   $state = @{ x = $X; y = $Y; label = $Label; ts = $ts; show = $Show } | ConvertTo-Json -Compress
-  Set-Content -Path (Join-Path $dir 'cursor.state') -Value $state -Encoding ascii
+  $statePath = Join-Path $dir 'cursor.state'
+  for ($i = 0; $i -lt 8; $i++) {
+    try {
+      [System.IO.File]::WriteAllText($statePath, $state, [System.Text.Encoding]::ASCII)
+      break
+    } catch {
+      Start-Sleep -Milliseconds 15
+    }
+  }
 }
 
 function Notify-Cursor {
@@ -735,16 +1083,19 @@ function Send-BackgroundText {
 
 function Send-BackgroundKey {
   param([IntPtr]$Hwnd, [string]$Key, [string]$Modifiers)
+  $parsed = Parse-KeyChord -RawKey $Key -RawModifiers $Modifiers
+  $Key = $parsed.Key
+  $Modifiers = $parsed.Modifiers
   $vk = [DshWin32]::MapKey($Key)
   if ($vk -eq 0) { throw "unknown key: $Key" }
   $modVks = @()
   if ($Modifiers) {
     foreach ($part in ($Modifiers -split '[,+]')) {
       $m = $part.Trim().ToLowerInvariant()
-      if ($m -in @('ctrl','control')) { $modVks += 0x11 }
-      elseif ($m -in @('shift')) { $modVks += 0x10 }
-      elseif ($m -in @('alt')) { $modVks += 0x12 }
-      elseif ($m -in @('win','meta','super')) { $modVks += 0x5B }
+      if ($m -in @('ctrl','control','control_l','control_r','ctrl_l','ctrl_r')) { $modVks += 0x11 }
+      elseif ($m -in @('shift','shift_l','shift_r')) { $modVks += 0x10 }
+      elseif ($m -in @('alt','alt_l','alt_r','option','option_l','option_r')) { $modVks += 0x12 }
+      elseif ($m -in @('win','meta','super','cmd','command')) { $modVks += 0x5B }
     }
   }
   $res = [IntPtr]::Zero
@@ -756,16 +1107,19 @@ function Send-BackgroundKey {
 
 function Send-BackgroundHoldKey {
   param([IntPtr]$Hwnd, [string]$Key, [string]$Modifiers, [int]$DurationMs)
+  $parsed = Parse-KeyChord -RawKey $Key -RawModifiers $Modifiers
+  $Key = $parsed.Key
+  $Modifiers = $parsed.Modifiers
   $vk = [DshWin32]::MapKey($Key)
   if ($vk -eq 0) { throw "unknown key: $Key" }
   $modVks = @()
   if ($Modifiers) {
     foreach ($part in ($Modifiers -split '[,+]')) {
       $m = $part.Trim().ToLowerInvariant()
-      if ($m -in @('ctrl','control')) { $modVks += 0x11 }
-      elseif ($m -in @('shift')) { $modVks += 0x10 }
-      elseif ($m -in @('alt')) { $modVks += 0x12 }
-      elseif ($m -in @('win','meta','super')) { $modVks += 0x5B }
+      if ($m -in @('ctrl','control','control_l','control_r','ctrl_l','ctrl_r')) { $modVks += 0x11 }
+      elseif ($m -in @('shift','shift_l','shift_r')) { $modVks += 0x10 }
+      elseif ($m -in @('alt','alt_l','alt_r','option','option_l','option_r')) { $modVks += 0x12 }
+      elseif ($m -in @('win','meta','super','cmd','command')) { $modVks += 0x5B }
     }
   }
   $res = [IntPtr]::Zero
@@ -987,6 +1341,10 @@ function Do-AppState {
     $fresh = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Hwnd -eq $win.Hwnd })
     if ($fresh.Count -gt 0) { $win = $fresh[0] }
   }
+  $dwmRect = [DshWin32]::GetDwmRect($win.Hwnd)
+  if ($dwmRect.Right -gt $dwmRect.Left -and $dwmRect.Bottom -gt $dwmRect.Top) {
+    $win.Rect = $dwmRect
+  }
   $shot = $null
   if ($WithScreenshot) {
     $dir = Join-Path $env:TEMP 'dsh-cua'
@@ -994,20 +1352,30 @@ function Do-AppState {
     $path = Join-Path $dir ("shot-{0}.png" -f ([guid]::NewGuid().ToString('N')))
     $w = $win.Rect.Right - $win.Rect.Left
     $h = $win.Rect.Bottom - $win.Rect.Top
-    # tier 1: PrintWindow (PW_RENDERFULLCONTENT) — works for background windows, but
-    # DirectComposition/UWP/hardware-accelerated targets can return pure black frames
-    $bmp = New-Object System.Drawing.Bitmap([Math]::Max(1, $w), [Math]::Max(1, $h))
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $hdc = $g.GetHdc()
-    $ok = [DshWin32]::PrintWindow($win.Hwnd, $hdc, 2)
-    $g.ReleaseHdc($hdc)
-    $g.Dispose()
+    # tier 1: PrintWindow multi-mode fallback (flags 2 -> 0 -> 3)
+    $bmp = $null
+    $ok = $false
+    $black = $true
+    foreach ($flag in @(2, 0, 3)) {
+      if ($bmp) { $bmp.Dispose(); $bmp = $null }
+      $bmp = New-Object System.Drawing.Bitmap([Math]::Max(1, $w), [Math]::Max(1, $h))
+      $g = [System.Drawing.Graphics]::FromImage($bmp)
+      $hdc = $g.GetHdc()
+      $tryOk = [DshWin32]::PrintWindow($win.Hwnd, $hdc, [uint32]$flag)
+      $g.ReleaseHdc($hdc)
+      $g.Dispose()
+      if ($tryOk) {
+        if (-not (Test-BitmapBlank $bmp $w $h)) {
+          $ok = $true
+          $black = $false
+          break
+        }
+      }
+    }
     if ($ok) { $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png) }
     # ponytail: GUID shot files are unbounded — keep newest 50, self-prunes the backlog too
     Get-ChildItem $dir -Filter 'shot-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
-    $black = $false
-    if ($ok) { $black = Test-BitmapBlank $bmp $w $h }
-    $bmp.Dispose()
+    if ($bmp) { $bmp.Dispose() }
     $minimized = [DshWin32]::IsIconic($win.Hwnd)
     if ($ok -and -not $black) {
       # tier 1 rendered real content (implicit method = print_window)
@@ -1055,7 +1423,7 @@ function Do-AppState {
       }
     }
   }
-  $tree = Get-AccessibilityTree $win.Hwnd
+  $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
   $docText = Get-DocumentText $win.Hwnd
   return @{
     window = (Get-WindowInfo $win)
@@ -1343,11 +1711,11 @@ function Invoke-ActionRequest {
     'list_apps' {
       $wins = @([DshWin32]::EnumWindowsList())
       $byPid = @{}
+      $procCache = @{}
       foreach ($w in $wins) {
         if ($w.Rect.Left -lt -10000 -or $w.Rect.Top -lt -10000) { continue }
         if (-not $byPid.ContainsKey($w.Pid)) {
-          $pinfo = Get-Process -Id $w.Pid -ErrorAction SilentlyContinue
-          $name = if ($pinfo) { $pinfo.ProcessName } else { "pid:$($w.Pid)" }
+          $name = Get-ProcessNameFast -ProcessId $w.Pid -Cache $procCache
           $byPid[$w.Pid] = @{ pid = $w.Pid; name = $name; windows = New-Object System.Collections.ArrayList }
         }
         $null = $byPid[$w.Pid].windows.Add((Get-WindowInfo $w))
@@ -1375,8 +1743,8 @@ function Invoke-ActionRequest {
 
     'click' {
       $app = Get-PayloadValue 'app'
-      $x = [int](Get-PayloadValue 'x')
-      $y = [int](Get-PayloadValue 'y')
+      $rawElement = Get-PayloadValue 'element'
+      $rawX = Get-PayloadValue 'x'; $rawY = Get-PayloadValue 'y'
       $button = Get-PayloadValue 'button'
       if (-not $button) { $button = 'left' }
       $button = ([string]$button).ToLowerInvariant()
@@ -1396,11 +1764,37 @@ function Invoke-ActionRequest {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') { [DshWin32]::ForceForeground($win.Hwnd) }
         $r = $win.Rect
-        $sx = $r.Left + $x; $sy = $r.Top + $y
         if ($dispatch -eq 'foreground') { $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64()) }
-      } else {
-        $sx = $x; $sy = $y
       }
+      $sx = 0; $sy = 0; $res = $false
+      if ($null -ne $rawElement -and ([string]$rawElement).Trim() -ne '' -and $win) {
+        try {
+          $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index ([int]$rawElement)
+          $er = $el.Current.BoundingRectangle
+          if ($er.Width -gt 0 -and $er.Height -gt 0) {
+            $sx = Safe-Int ($er.X + $er.Width / 2); $sy = Safe-Int ($er.Y + $er.Height / 2)
+            $res = $true; $result.element = [int]$rawElement
+          }
+        } catch { }
+      }
+      if (-not $res) {
+        $hx = ($null -ne $rawX); $hy = ($null -ne $rawY)
+        $x = if ($hx) { [int]$rawX } else { 0 }
+        $y = if ($hy) { [int]$rawY } else { 0 }
+        if ($win) {
+          if ($hx -and $hy -and $x -ge $r.Left -and $x -le $r.Right -and $y -ge $r.Top -and $y -le $r.Bottom) {
+            $sx = $x; $sy = $y
+          } elseif ($hx -or $hy) {
+            $sx = $r.Left + $x; $sy = $r.Top + $y
+          }
+          if ((-not $hx -and -not $hy) -or ($x -le 0 -and $y -le 0) -or ($sx -le 0 -and $sy -le 0)) {
+            $c = Get-OverlayPoint-WindowCenter $win; $sx = $c[0]; $sy = $c[1]
+          }
+        } else {
+          $sx = $x; $sy = $y
+        }
+      }
+
       $label = 'click'
       if ($clickCount -eq 2) { $label = 'double-click' }
       elseif ($clickCount -eq 3) { $label = 'triple-click' }
@@ -1459,6 +1853,7 @@ function Invoke-ActionRequest {
         }
         $result.clicked = @{ x = $sx; y = $sy }
       } else {
+        Notify-Cursor -X $sx -Y $sy -Label $label
         [DshWin32]::MouseClickEx($sx, $sy, $clickCount, $button)
         $result.button = $button
         $result.click_count = $clickCount
@@ -1481,6 +1876,11 @@ function Invoke-ActionRequest {
       # cursor indicator for ALL element interaction patterns: fire once up-front for
       # any element with a valid bounding rectangle (Invoke/Toggle/Selection/ExpandCollapse)
       if ($dispatch -eq 'background') {
+        $elRect = $el.Current.BoundingRectangle
+        if ($elRect.Width -gt 0 -and $elRect.Height -gt 0) {
+          Notify-Cursor -X (Safe-Int ($elRect.X + $elRect.Width / 2)) -Y (Safe-Int ($elRect.Y + $elRect.Height / 2)) -Label ('click element ' + $element)
+        }
+      } else {
         $elRect = $el.Current.BoundingRectangle
         if ($elRect.Width -gt 0 -and $elRect.Height -gt 0) {
           Notify-Cursor -X (Safe-Int ($elRect.X + $elRect.Width / 2)) -Y (Safe-Int ($elRect.Y + $elRect.Height / 2)) -Label ('click element ' + $element)
@@ -1629,8 +2029,11 @@ function Invoke-ActionRequest {
 
     'key' {
       $app = Get-PayloadValue 'app'
-      $key = Get-PayloadValue 'key'
-      $mods = Get-PayloadValue 'modifiers'
+      $rawKey = Get-PayloadValue 'key'
+      $rawMods = Get-PayloadValue 'modifiers'
+      $chord = Parse-KeyChord -RawKey $rawKey -RawModifiers $rawMods
+      $key = $chord.Key
+      $mods = $chord.Modifiers
       $dispatch = Get-Dispatch
       $win = $null
       if ($app) {
@@ -1890,9 +2293,12 @@ function Invoke-ActionRequest {
 
     'hold_key' {
       $app = Get-PayloadValue 'app'
-      $key = Get-PayloadValue 'key'
-      if (-not $key) { throw "hold_key requires 'key' parameter" }
-      $mods = Get-PayloadValue 'modifiers'
+      $rawKey = Get-PayloadValue 'key'
+      if (-not $rawKey) { throw "hold_key requires 'key' parameter" }
+      $rawMods = Get-PayloadValue 'modifiers'
+      $chord = Parse-KeyChord -RawKey $rawKey -RawModifiers $rawMods
+      $key = $chord.Key
+      $mods = $chord.Modifiers
       $rawDur = Get-PayloadValue 'duration_ms'
       $dur = if ($null -eq $rawDur) { 500 } else { [int]$rawDur }
       if ($dur -lt 50) { $dur = 50 }
@@ -1939,19 +2345,24 @@ function Invoke-ActionRequest {
       $cmd = Split-AppCommand -Name ([string]$name)
       $filePath = $cmd[0]
       $argList = @($cmd[1])
-      # launch WITHOUT stealing the user's foreground window:
-      $prevFg = [DshWin32]::GetForegroundWindow()
+      # Launch silently in background using -WindowStyle Minimized (direct at bottom, zero flicker/focus steal)
+      $style = if (Get-PayloadValue 'activate' -or (Get-Dispatch) -eq 'foreground') { 'Normal' } else { 'Minimized' }
       $proc = if ($argList.Count -gt 0) {
-        Start-Process -FilePath $filePath -ArgumentList $argList -PassThru
+        Start-Process -FilePath $filePath -ArgumentList $argList -WindowStyle $style -PassThru
       } else {
-        Start-Process -FilePath $filePath -PassThru
+        Start-Process -FilePath $filePath -WindowStyle $style -PassThru
       }
-      Start-Sleep -Milliseconds 800
-      if ($prevFg -ne [IntPtr]::Zero -and $prevFg -ne $proc.MainWindowHandle) {
-        try { [DshWin32]::ForceForeground($prevFg) } catch { }
-      }
-      $result.message = "Started $filePath ($($argList.Count) argument(s)) (focus restored to your previous window; operated in background)"
+      $result.message = "Started $filePath ($($argList.Count) argument(s)) (launched $style in background)"
       $result.pid = $proc.Id
+      # Quick non-blocking lookup for main window handle
+      for ($i = 0; $i -lt 12; $i++) {
+        Start-Sleep -Milliseconds 50
+        $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
+        if ($wins.Count -gt 0) {
+          $result.hwnd = $wins[0].Hwnd.ToInt64()
+          break
+        }
+      }
     }
 
     'mouse_move' {
@@ -1962,7 +2373,14 @@ function Invoke-ActionRequest {
       $win = $null
       if ($app) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
-        $sx = $win.Rect.Left + $x; $sy = $win.Rect.Top + $y
+        $r = $win.Rect
+        if ($x -ge $r.Left -and $x -le $r.Right -and $y -ge $r.Top -and $y -le $r.Bottom) {
+          $sx = $x; $sy = $y
+        } elseif ($x -gt 0 -or $y -gt 0) {
+          $sx = $r.Left + $x; $sy = $r.Top + $y
+        } else {
+          $c = Get-OverlayPoint-WindowCenter $win; $sx = $c[0]; $sy = $c[1]
+        }
       } else {
         $sx = $x; $sy = $y
       }
@@ -1978,6 +2396,72 @@ function Invoke-ActionRequest {
         $result.position = @{ x = $sx; y = $sy }
         $result.message = "Moved the real mouse cursor to ($sx, $sy)"
       }
+    }
+
+    'activate_window' {
+      $app = Get-PayloadValue 'app'
+      $idx = [int](Get-PayloadValue 'window_index')
+      $hwndVal = Get-PayloadValue 'hwnd'
+      $hwnd = if ($hwndVal) { [int64]$hwndVal } else { 0 }
+      $win = Resolve-TargetWindow -App $app -Index $idx -Hwnd $hwnd
+      [DshWin32]::ForceForeground($win.Hwnd)
+      $fgHwnd = [DshWin32]::GetForegroundWindow()
+      $activated = ($fgHwnd -eq $win.Hwnd -or [DshWin32]::IsChild($win.Hwnd, $fgHwnd))
+      $result.hwnd = $win.Hwnd.ToInt64()
+      $result.title = $win.Title
+      $result.activated = [bool]$activated
+      $result.message = "Activated window '$($win.Title)' (hwnd=$($win.Hwnd.ToInt64()), activated=$activated)"
+    }
+
+    'close_window' {
+      $app = Get-PayloadValue 'app'
+      $idx = [int](Get-PayloadValue 'window_index')
+      $hwndVal = Get-PayloadValue 'hwnd'
+      $hwnd = if ($hwndVal) { [int64]$hwndVal } else { 0 }
+      $win = Resolve-TargetWindow -App $app -Index $idx -Hwnd $hwnd
+      $targetHwnd = $win.Hwnd
+      $title = $win.Title
+      $sendOk = [DshWin32]::CloseWindowGracefully($targetHwnd, 3000)
+      for ($i = 0; $i -lt 10; $i++) {
+        if (-not [DshWin32]::IsWindow($targetHwnd)) { break }
+        Start-Sleep -Milliseconds 50
+      }
+      $result.hwnd = $targetHwnd.ToInt64()
+      $result.title = $title
+      $result.closed = [bool]$sendOk
+      $result.message = "Closed window '$title' (hwnd=$($targetHwnd.ToInt64()))"
+    }
+
+    'get_window' {
+      $app = Get-PayloadValue 'app'
+      $idx = [int](Get-PayloadValue 'window_index')
+      $hwndVal = Get-PayloadValue 'hwnd'
+      $hwnd = if ($hwndVal) { [int64]$hwndVal } else { 0 }
+      $win = Resolve-TargetWindow -App $app -Index $idx -Hwnd $hwnd
+      $rect = [DshWin32]::GetDwmRect($win.Hwnd)
+      $pname = Get-ProcessNameFast -ProcessId $win.Pid -Cache $null
+      $isMin = [DshWin32]::IsIconic($win.Hwnd)
+      $sb = New-Object System.Text.StringBuilder(512)
+      $null = [DshWin32]::GetWindowText($win.Hwnd, $sb, 512)
+      $title = $sb.ToString()
+      $rectObj = @{ x = $rect.Left; y = $rect.Top; width = ($rect.Right - $rect.Left); height = ($rect.Bottom - $rect.Top) }
+      $winInfo = @{
+        hwnd = $win.Hwnd.ToInt64()
+        title = $title
+        pid = $win.Pid
+        process_name = $pname
+        rect = $rectObj
+        minimized = [bool]$isMin
+        foreground = (-not $isMin -and ([DshWin32]::GetForegroundWindow() -eq $win.Hwnd))
+      }
+      $result.window = $winInfo
+      $result.hwnd = $win.Hwnd.ToInt64()
+      $result.title = $title
+      $result.pid = $win.Pid
+      $result.process_name = $pname
+      $result.rect = $rectObj
+      $result.minimized = [bool]$isMin
+      $result.message = "Window metadata for '$title' (hwnd=$($win.Hwnd.ToInt64()), pid=$($win.Pid))"
     }
 
     'list_windows' {
