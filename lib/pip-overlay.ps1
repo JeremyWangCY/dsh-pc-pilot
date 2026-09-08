@@ -9,7 +9,6 @@ param(
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
-Add-Type -AssemblyName System.Drawing
 
 $sig = @"
 using System;
@@ -47,6 +46,8 @@ $xaml = @"
         Background="Transparent"
         Topmost="True"
         ShowInTaskbar="False"
+        ShowActivated="False"
+        Focusable="False"
         ResizeMode="NoResize">
     <Border Name="MainCard" CornerRadius="16" Background="#E61C1C1E" BorderBrush="#26FFFFFF" BorderThickness="1">
         <Border.Effect>
@@ -113,16 +114,16 @@ $placeholder = $win.FindName('PlaceholderPanel')
 $previewContainer = $win.FindName('PreviewContainer')
 $headerBar = $win.FindName('HeaderBar')
 
-# Default screen placement: bottom-right corner with 24px padding
-$screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+# Default screen placement: bottom-right corner with 24px padding (pure WPF native)
+$workArea = [System.Windows.SystemParameters]::WorkArea
 $defaultW = 380
 $defaultH = 240
 if ($InitialX -ge 0 -and $InitialY -ge 0) {
   $win.Left = $InitialX
   $win.Top = $InitialY
 } else {
-  $win.Left = $screen.Right - $defaultW - 24
-  $win.Top = $screen.Bottom - $defaultH - 24
+  $win.Left = $workArea.Right - $defaultW - 24
+  $win.Top = $workArea.Bottom - $defaultH - 24
 }
 
 # State variables
