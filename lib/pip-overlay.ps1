@@ -10,6 +10,91 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
+# Win32 surface for the virtual display canvas mirror (EnumDisplay* + GDI cleanup)
+$sig2 = @"
+using System;
+using System.Runtime.InteropServices;
+public static class DshPipGdi {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+  public struct DISPLAY_DEVICE {
+    public int cb;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+    public int StateFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+  }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+  public struct DEVMODE {
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+    public ushort dmSpecVersion; public ushort dmDriverVersion;
+    public ushort dmSize; public ushort dmDriverExtra;
+    public uint dmFields;
+    public int dmPositionX; public int dmPositionY;
+    public uint dmDisplayOrientation; public uint dmDisplayFixedOutput;
+    public short dmColor; public short dmDuplex; public short dmYResolution; public short dmTTOption; public short dmCollate;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+    public ushort dmLogPixels; public uint dmBitsPerPel; public uint dmPelsWidth; public uint dmPelsHeight;
+    public uint dmDisplayFlags; public uint dmDisplayFrequency;
+    public uint dmICMMethod; public uint dmICMIntent; public uint dmMediaType; public uint dmDitherType;
+    public uint dmReserved1; public uint dmReserved2; public uint dmPanningWidth; public uint dmPanningHeight;
+  }
+  [DllImport("user32.dll", CharSet = CharSet.Ansi)] public static extern bool EnumDisplayDevices(string dev, uint num, ref DISPLAY_DEVICE dd, uint flags);
+  [DllImport("user32.dll", CharSet = CharSet.Ansi)] public static extern bool EnumDisplaySettings(string dev, uint mode, ref DEVMODE dm);
+
+  [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
+  [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+  [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr hdcDest, int x, int y, int w, int h, IntPtr hdcSrc, int xSrc, int ySrc, uint rop);
+  [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+  public const uint SRCCOPY = 0x00CC0020;
+
+  // All enum logic runs inside C#: PowerShell struct-byref marshaling of DISPLAY_DEVICE
+  // fails silently, so the PowerShell loop approach cannot be trusted here.
+  public static string GetVddRect()
+  {
+    for (uint i = 0; i < 64; i++)
+    {
+      DISPLAY_DEVICE ad = new DISPLAY_DEVICE(); ad.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+      if (!EnumDisplayDevices(null, i, ref ad, 0)) break;
+      if (ad.DeviceString != "Virtual Display Driver") continue;
+      DISPLAY_DEVICE mon = new DISPLAY_DEVICE(); mon.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+      if (!EnumDisplayDevices(ad.DeviceName, 0, ref mon, 0)) continue;
+      if ((mon.StateFlags & 1) == 0) continue;  // monitor not attached to desktop
+      DEVMODE dm = new DEVMODE(); dm.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODE));
+      if (!EnumDisplaySettings(ad.DeviceName, 0xFFFFFFFF, ref dm)) continue;
+      return dm.dmPositionX + "," + dm.dmPositionY + "," + dm.dmPelsWidth + "," + dm.dmPelsHeight;
+    }
+    return "";
+  }
+
+  // Pure GDI capture of a screen rect; returns a caller-owned HBITMAP (delete after use).
+  public static IntPtr CaptureRect(int x, int y, int w, int h)
+  {
+    IntPtr hdcScreen = GetDC(IntPtr.Zero);
+    if (hdcScreen == IntPtr.Zero) return IntPtr.Zero;
+    try
+    {
+      IntPtr hMem = CreateCompatibleDC(hdcScreen);
+      IntPtr hBmp = CreateCompatibleBitmap(hdcScreen, w, h);
+      if (hMem == IntPtr.Zero || hBmp == IntPtr.Zero) { if (hBmp != IntPtr.Zero) DeleteObject(hBmp); if (hMem != IntPtr.Zero) DeleteDC(hMem); return IntPtr.Zero; }
+      IntPtr old = SelectObject(hMem, hBmp);
+      BitBlt(hMem, 0, 0, w, h, hdcScreen, x, y, SRCCOPY);
+      SelectObject(hMem, old);
+      DeleteDC(hMem);
+      return hBmp;
+    }
+    finally { ReleaseDC(IntPtr.Zero, hdcScreen); }
+  }
+}
+"@
+if (-not ([System.Management.Automation.PSTypeName]'DshPipGdi').Type) {
+  Add-Type -TypeDefinition $sig2
+}
+
 $sig = @"
 using System;
 using System.Runtime.InteropServices;
@@ -132,6 +217,23 @@ $script:isExpanded = $false
 $script:lastFramePath = ''
 $script:lastTs = 0.0
 $script:lastActive = [DateTime]::Now
+$script:tickCount = 0
+$script:vddRect = $null
+$script:vddRectAt = [DateTime]::MinValue
+
+# Locate the active Virtual Display Driver monitor rect (physical pixels); cached 30s
+function Get-DshVddRect {
+  if (([DateTime]::Now - $script:vddRectAt).TotalSeconds -lt 30) { return $script:vddRect }
+  $rect = $null
+  $raw = [DshPipGdi]::GetVddRect()
+  if ($raw) {
+    $p = $raw.Split(',')
+    $rect = @{ x = [int]$p[0]; y = [int]$p[1]; w = [int]$p[2]; h = [int]$p[3] }
+  }
+  $script:vddRect = $rect
+  $script:vddRectAt = [DateTime]::Now
+  return $rect
+}
 
 # Drag to move window
 $headerBar.Add_MouseLeftButtonDown({
@@ -218,6 +320,27 @@ $timer.Add_Tick({
         }
       }
     } catch { }
+  }
+
+  # Virtual display canvas mirror: when the helper parks windows on a real IddCx
+  # virtual monitor, that desktop region is private to the AI — mirroring it is
+  # always safe (never leaks the user's physical screen). Rendered in-place, no disk.
+  $script:tickCount++
+  if (-not $script:isMini -and $win.IsVisible -and (($script:tickCount % 4) -eq 0)) {
+    $vc = Get-DshVddRect
+    if ($vc) {
+      try {
+        $hBmp = [DshPipGdi]::CaptureRect($vc.x, $vc.y, $vc.w, $vc.h)
+        if ($hBmp -ne [IntPtr]::Zero) {
+          $src = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHBitmap($hBmp, [IntPtr]::Zero, [System.Windows.Int32Rect]::Empty, [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+          $src.Freeze()
+          [DshPipGdi]::DeleteObject($hBmp) | Out-Null
+          $previewImg.Source = $src
+          $placeholder.Visibility = [System.Windows.Visibility]::Collapsed
+          $script:lastFramePath = ''
+        }
+      } catch { }
+    }
   }
 
   # Auto-exit if completely idle for 10 minutes

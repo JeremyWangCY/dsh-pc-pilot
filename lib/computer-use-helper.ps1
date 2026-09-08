@@ -1494,7 +1494,16 @@ function Do-AppState {
     if ($shot -and $shot.path) {
       $t = if ($win.Title) { [string]$win.Title } else { '' }
       $isUserWorkbench = ($t -like '*Workbench*' -or $t -like '*DeepX*' -or $t -like '*deepx*')
-      $isPhysicalDesktopMirror = ($shot.method -eq 'bitblt_screen' -and $win.Rect.Left -ge 0 -and $win.Rect.Left -lt 2000)
+      # BitBlt of a physical-desktop rect snapshots whatever the USER sees right now, so
+      # such a frame must never reach the PiP (mirror leak). It is only safe when the
+      # window lives on the virtual display canvas, where the OS renders a private desktop.
+      $vc = Get-DshVirtualCanvas
+      $onCanvas = $false
+      if ($vc) {
+        $onCanvas = ($win.Rect.Left -ge $vc.x -and $win.Rect.Right -le ($vc.x + $vc.w) -and
+                     $win.Rect.Top -ge $vc.y -and $win.Rect.Bottom -le ($vc.y + $vc.h))
+      }
+      $isPhysicalDesktopMirror = ($shot.method -eq 'bitblt_screen' -and -not $onCanvas)
       if (-not $isUserWorkbench -and -not $isPhysicalDesktopMirror) {
         try { Notify-Pip -Label ('Viewing ' + $win.Title) -FramePath $shot.path } catch { }
       }
@@ -1513,6 +1522,92 @@ function Do-AppState {
 }
 
 # ---------------------------------------------------------------- actions
+
+function Get-DshVirtualCanvas {
+  # Returns @{ x, y, w, h } (physical pixels) of the active Virtual Display Driver (IddCx)
+  # monitor, or $null when no VDD monitor is attached to the desktop. SetWindowPos and
+  # CopyFromScreen both operate in these physical coordinates.
+  if (-not ([System.Management.Automation.PSTypeName]'DshDispEnum').Type) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class DshDispEnum {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+  public struct DISPLAY_DEVICE {
+    public int cb;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+    public int StateFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+  }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
+  public struct DEVMODE {
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+    public ushort dmSpecVersion; public ushort dmDriverVersion;
+    public ushort dmSize; public ushort dmDriverExtra;
+    public uint dmFields;
+    public int dmPositionX; public int dmPositionY;
+    public uint dmDisplayOrientation; public uint dmDisplayFixedOutput;
+    public short dmColor; public short dmDuplex; public short dmYResolution; public short dmTTOption; public short dmCollate;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+    public ushort dmLogPixels; public uint dmBitsPerPel; public uint dmPelsWidth; public uint dmPelsHeight;
+    public uint dmDisplayFlags; public uint dmDisplayFrequency;
+    public uint dmICMMethod; public uint dmICMIntent; public uint dmMediaType; public uint dmDitherType;
+    public uint dmReserved1; public uint dmReserved2; public uint dmPanningWidth; public uint dmPanningHeight;
+  }
+  [DllImport("user32.dll", CharSet = CharSet.Ansi)] public static extern bool EnumDisplayDevices(string dev, uint num, ref DISPLAY_DEVICE dd, uint flags);
+  [DllImport("user32.dll", CharSet = CharSet.Ansi)] public static extern bool EnumDisplaySettings(string dev, uint mode, ref DEVMODE dm);
+
+  // All enum logic runs inside C#: PowerShell struct-byref marshaling of DISPLAY_DEVICE
+  // fails silently, so the PowerShell loop approach cannot be trusted here.
+  public static string GetVddRect()
+  {
+    for (uint i = 0; i < 64; i++)
+    {
+      DISPLAY_DEVICE ad = new DISPLAY_DEVICE(); ad.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+      if (!EnumDisplayDevices(null, i, ref ad, 0)) break;
+      if (ad.DeviceString != "Virtual Display Driver") continue;
+      DISPLAY_DEVICE mon = new DISPLAY_DEVICE(); mon.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+      if (!EnumDisplayDevices(ad.DeviceName, 0, ref mon, 0)) continue;
+      if ((mon.StateFlags & 1) == 0) continue;  // monitor not attached to desktop
+      DEVMODE dm = new DEVMODE(); dm.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODE));
+      if (!EnumDisplaySettings(ad.DeviceName, 0xFFFFFFFF, ref dm)) continue;
+      return dm.dmPositionX + "," + dm.dmPositionY + "," + dm.dmPelsWidth + "," + dm.dmPelsHeight;
+    }
+    return "";
+  }
+}
+'@
+  }
+  # ponytail: topology only changes on user action — a short cache keeps per-action
+  # calls cheap without ever serving a stale rect across a real topology change
+  if ($script:dshVddCache -and ((Get-Date) - $script:dshVddCache.at).TotalSeconds -lt 2) {
+    return $script:dshVddCache.rect
+  }
+  $rect = $null
+  $raw = [DshDispEnum]::GetVddRect()
+  if ($raw) {
+    $p = $raw.Split(',')
+    $rect = @{ x = [int]$p[0]; y = [int]$p[1]; w = [int]$p[2]; h = [int]$p[3] }
+  }
+  $script:dshVddCache = @{ at = (Get-Date); rect = $rect }
+  return $rect
+}
+
+function Move-WindowToCanvas {
+  # Show a window (without activation) and place it on the virtual display canvas when one
+  # is active; fall back to the legacy off-desktop parking spot (3000, 0) otherwise.
+  param([IntPtr]$Hwnd, [int]$W = 1280, [int]$H = 800)
+  $vc = Get-DshVirtualCanvas
+  if ($vc) {
+    [DshWin32]::ShowWindow($Hwnd, [DshWin32]::SW_SHOWNOACTIVATE) | Out-Null
+    [DshWin32]::SetWindowPos($Hwnd, [IntPtr]::Zero, $vc.x, $vc.y, $W, $H, 0x0050) | Out-Null
+    return "virtual canvas ($($vc.x), $($vc.y)) $($W)x$($H)"
+  }
+  [DshWin32]::SetWindowPos($Hwnd, [IntPtr]::Zero, 3000, 0, $W, $H, 0x0050) | Out-Null
+  return "legacy off-screen canvas (3000, 0)"
+}
 
 function Split-AppCommand {
   # Split an open_app name like 'notepad.exe C:\foo.txt' or
@@ -2445,7 +2540,8 @@ function Invoke-ActionRequest {
         $isolateVal = Get-PayloadValue 'isolate'
         $shouldIsolate = if ($null -ne $isolateVal) { [bool]$isolateVal } else { ((Get-Dispatch) -eq 'background') }
         if ($shouldIsolate) {
-          [DshWin32]::SetWindowPos([IntPtr]$result.hwnd, [IntPtr]::Zero, 3000, 0, 1280, 800, 0x0050) | Out-Null
+          $canvasNote = Move-WindowToCanvas -Hwnd ([IntPtr]$result.hwnd)
+          $result.canvas = $canvasNote
         }
       }
       try { Notify-Pip -Label ("Opening " + [System.IO.Path]::GetFileName($filePath)) } catch { }
@@ -2861,8 +2957,8 @@ function Invoke-ActionRequest {
         [DshWin32]::SetWindowPos($win.Hwnd, [IntPtr]::Zero, 100, 100, 1280, 800, 0x0050) | Out-Null
         $result.message = "Restored window to primary screen (100, 100)"
       } else {
-        [DshWin32]::SetWindowPos($win.Hwnd, [IntPtr]::Zero, 3000, 0, 1280, 800, 0x0050) | Out-Null
-        $result.message = "Moved window to isolated virtual canvas (3000, 0)"
+        $canvasNote = Move-WindowToCanvas -Hwnd $win.Hwnd
+        $result.message = "Moved window to isolated $canvasNote"
       }
       $result.window = (Get-WindowInfo $win)
     }
