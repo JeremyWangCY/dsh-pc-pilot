@@ -88,6 +88,7 @@ public static class DshPipGdi {
   // coords) sits inside the rect, composite a codex-style arrow + focus ring at
   // its exact mapped position — so the user can see what the AI is about to click
   // without leaving the primary screen.
+  static int pulseTick = 0;
   public static IntPtr CaptureRectWithCursor(int x, int y, int w, int h, int cx, int cy, bool showCursor)
   {
     IntPtr hdcScreen = GetDC(IntPtr.Zero);
@@ -102,11 +103,13 @@ public static class DshPipGdi {
       if (showCursor && cx >= x && cy >= y && cx < x + w && cy < y + h)
       {
         int lx = cx - x, ly = cy - y;
-        // focus ring: hollow circle in #0A84FF (COLORREF is 0x00BBGGRR)
+        // focus ring: hollow circle in #0A84FF (COLORREF is 0x00BBGGRR), gently
+        // pulsing radius so a resting cursor still reads as "live" in the mirror
+        int ringR = 52 + ((pulseTick++ % 4) * 6);
         IntPtr ringPen = CreatePen(0, 8, 0x00FF840Au);
         IntPtr hollow = GetStockObject(5); // NULL_BRUSH
         IntPtr oPen = SelectObject(hMem, ringPen); IntPtr oBrush = SelectObject(hMem, hollow);
-        Ellipse(hMem, lx - 66, ly - 66, lx + 66, ly + 66);
+        Ellipse(hMem, lx - ringR, ly - ringR, lx + ringR, ly + ringR);
         SelectObject(hMem, oPen); SelectObject(hMem, oBrush);
         DeleteObject(ringPen);
         // codex-style arrow (DshVcLayer tip geometry scaled 3.2x): dark outline + white body
@@ -184,22 +187,25 @@ $xaml = @"
                     <TextBlock Text="AI Workspace" Foreground="#E5FFFFFF" FontSize="11" FontWeight="SemiBold" FontFamily="Segoe UI Variable Display, SF Pro Text, Segoe UI"/>
                     <Border Background="#2634C759" CornerRadius="8" Padding="6,2" Margin="8,0,0,0">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="5" Height="5" Fill="#34C759" Margin="0,0,4,0"/>
+                            <Ellipse Name="LiveDot" Width="5" Height="5" Fill="#34C759" Margin="0,0,4,0"/>
                             <TextBlock Text="Live" Foreground="#34C759" FontSize="9" FontWeight="Bold"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
 
-                <!-- Right Apple Traffic Light Control Buttons -->
+                <!-- Right Apple Traffic Light Control Buttons (macOS order: close / minimize / zoom) -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <Border Name="BtnClose" Width="11" Height="11" CornerRadius="5.5" Background="#FF5F56" Margin="0,0,7,0" Cursor="Hand">
+                        <TextBlock Name="GlyphClose" Text="&#215;" FontSize="8" FontWeight="Bold" Foreground="#7A000000" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0" Opacity="0"/>
+                        <Border.ToolTip><ToolTip Content="Close PiP"/></Border.ToolTip>
+                    </Border>
                     <Border Name="BtnMini" Width="11" Height="11" CornerRadius="5.5" Background="#FFBD2E" Margin="0,0,7,0" Cursor="Hand">
+                        <TextBlock Name="GlyphMini" Text="&#8722;" FontSize="8" FontWeight="Bold" Foreground="#7A000000" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" Opacity="0"/>
                         <Border.ToolTip><ToolTip Content="Dynamic Island Mini Mode"/></Border.ToolTip>
                     </Border>
-                    <Border Name="BtnExpand" Width="11" Height="11" CornerRadius="5.5" Background="#27C93F" Margin="0,0,7,0" Cursor="Hand">
+                    <Border Name="BtnExpand" Width="11" Height="11" CornerRadius="5.5" Background="#27C93F" Cursor="Hand">
+                        <TextBlock Name="GlyphExpand" Text="&#43;" FontSize="8" FontWeight="Bold" Foreground="#7A000000" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" Opacity="0"/>
                         <Border.ToolTip><ToolTip Content="Toggle Large Preview"/></Border.ToolTip>
-                    </Border>
-                    <Border Name="BtnClose" Width="11" Height="11" CornerRadius="5.5" Background="#FF5F56" Cursor="Hand">
-                        <Border.ToolTip><ToolTip Content="Close PiP"/></Border.ToolTip>
                     </Border>
                 </StackPanel>
             </Grid>
@@ -236,6 +242,15 @@ $actionLabel = $win.FindName('ActionLabel')
 $placeholder = $win.FindName('PlaceholderPanel')
 $previewContainer = $win.FindName('PreviewContainer')
 $headerBar = $win.FindName('HeaderBar')
+$liveDot = $win.FindName('LiveDot')
+
+# macOS hover affordance: the x - + glyphs fade in while the pointer rests on a light
+$gc = $win.FindName('GlyphClose')
+if ($gc) { $btnClose.Add_MouseEnter({ $gc.Opacity = 1.0 }); $btnClose.Add_MouseLeave({ $gc.Opacity = 0.0 }) }
+$gm = $win.FindName('GlyphMini')
+if ($gm) { $btnMini.Add_MouseEnter({ $gm.Opacity = 1.0 }); $btnMini.Add_MouseLeave({ $gm.Opacity = 0.0 }) }
+$ge = $win.FindName('GlyphExpand')
+if ($ge) { $btnExpand.Add_MouseEnter({ $ge.Opacity = 1.0 }); $btnExpand.Add_MouseLeave({ $ge.Opacity = 0.0 }) }
 
 # Default screen placement: bottom-right corner with 24px padding (pure WPF native)
 $workArea = [System.Windows.SystemParameters]::WorkArea
@@ -248,6 +263,30 @@ if ($InitialX -ge 0 -and $InitialY -ge 0) {
   $win.Left = $workArea.Right - $defaultW - 24
   $win.Top = $workArea.Bottom - $defaultH - 24
 }
+# Functional: remember where the user dragged the PiP - after an idle-exit respawn
+# the window lands in the same spot instead of jumping back to the default corner
+$posFile = Join-Path $dir "pip.pos"
+if (Test-Path $posFile) {
+  try {
+    $pp = Get-Content $posFile -Raw | ConvertFrom-Json
+    if ($pp.x -ge 0 -and $pp.y -ge 0) {
+      $restX = [Math]::Max(0, [Math]::Min([double]$pp.x, [double]($workArea.Right - $defaultW)))
+      $restY = [Math]::Max(0, [Math]::Min([double]$pp.y, [double]($workArea.Bottom - $defaultH)))
+      $win.Left = $restX
+      $win.Top = $restY
+    }
+  } catch { }
+}
+$win.Add_LocationChanged({ $script:posDirty = $true })
+
+# Apple aesthetics: the Live dot breathes (gentle opacity pulse, like iOS green dots)
+$breath = New-Object System.Windows.Media.Animation.DoubleAnimation
+$breath.From = 1.0
+$breath.To = 0.35
+$breath.Duration = [TimeSpan]::FromSeconds(1.2)
+$breath.AutoReverse = $true
+$breath.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+$liveDot.BeginAnimation([System.Windows.Media.UIElement]::OpacityProperty, $breath)
 
 # State variables
 $script:isMini = $false
@@ -258,6 +297,9 @@ $script:lastActive = [DateTime]::Now
 $script:tickCount = 0
 $script:vddRect = $null
 $script:vddRectAt = [DateTime]::MinValue
+$script:labelAt = [DateTime]::Now
+$script:pillFaded = $false
+$script:posDirty = $false
 # AI virtual cursor state (cursor.state, physical screen coords — those land on
 # the virtual canvas when AI windows are parked there)
 $script:cursorFile = Join-Path $dir "cursor.state"
@@ -344,6 +386,10 @@ $timer.Add_Tick({
 
         if ($st.label) {
           $actionLabel.Text = [string]$st.label
+          $actionLabel.BeginAnimation([System.Windows.Media.UIElement]::OpacityProperty, $null)
+          $actionLabel.Opacity = 1.0
+          $script:labelAt = [DateTime]::Now
+          $script:pillFaded = $false
         }
 
         if ($st.frame -and (Test-Path $st.frame) -and ($st.frame -ne $script:lastFramePath)) {
@@ -407,6 +453,22 @@ $timer.Add_Tick({
         }
       } catch { }
     }
+  }
+
+  # Action pill: fade out 2.5s after the last action (Apple-style quiet surface)
+  if (-not $script:pillFaded -and (([DateTime]::Now - $script:labelAt).TotalSeconds -gt 2.5)) {
+    $script:pillFaded = $true
+    $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, (New-Object System.Windows.Duration([TimeSpan]::FromMilliseconds(400))))
+    $actionLabel.BeginAnimation([System.Windows.Media.UIElement]::OpacityProperty, $fade)
+  }
+
+  # flush the persisted PiP position after a drag (debounced by the 150ms tick)
+  if ($script:posDirty) {
+    $script:posDirty = $false
+    try {
+      $pos = @{ x = [int]$win.Left; y = [int]$win.Top } | ConvertTo-Json -Compress
+      [System.IO.File]::WriteAllText($posFile, $pos, [System.Text.Encoding]::ASCII)
+    } catch { }
   }
 
   # Auto-exit if completely idle for 10 minutes

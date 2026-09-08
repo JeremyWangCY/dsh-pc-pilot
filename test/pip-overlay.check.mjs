@@ -28,6 +28,12 @@ assert.ok(pipSrc.includes('Live'), 'Must include Live status pill')
 assert.ok(pipSrc.includes('CaptureRectWithCursor'), 'Must composite the AI virtual cursor into the canvas mirror')
 assert.ok(pipSrc.includes('cursor.state'), 'Must read the AI virtual cursor state file')
 assert.ok(pipSrc.includes('Polygon') && pipSrc.includes('Ellipse'), 'Cursor glyph must be drawn with pure GDI, not System.Drawing')
+assert.ok(pipSrc.includes('GlyphClose') && pipSrc.includes('GlyphMini') && pipSrc.includes('GlyphExpand'), 'Traffic lights must expose macOS hover glyphs')
+assert.ok(pipSrc.indexOf('BtnClose') < pipSrc.indexOf('BtnMini') && pipSrc.indexOf('BtnMini') < pipSrc.indexOf('BtnExpand'), 'Traffic light order must be macOS (close/minimize/zoom)')
+assert.ok(pipSrc.includes('LiveDot') && pipSrc.includes('RepeatBehavior]::Forever'), 'Live dot must breathe (opacity pulse)')
+assert.ok(pipSrc.includes('pip.pos'), 'PiP must remember its dragged position across respawns')
+assert.ok(pipSrc.includes('pillFaded'), 'Action pill must fade out after the last action')
+assert.ok(pipSrc.includes('pulseTick'), 'Cursor focus ring must pulse (radius varies per mirror tick)')
 
 // 2. Verify computer-use-helper.ps1 and index.js
 const helperPath = path.join(repoDir, 'lib', 'computer-use-helper.ps1')
