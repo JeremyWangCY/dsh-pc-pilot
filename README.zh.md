@@ -21,7 +21,7 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 单工具全桌面（30 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait`；工作区扩展：`toggle_pip` / `isolate_window` / `setup_virtual_display` |
+| 单工具全桌面（31 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait`；工作区扩展：`toggle_pip` / `isolate_window` / `setup_virtual_display` |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 丰富鼠标词汇 | 左 / 右 / 中键，双击（`click_count: 2`）、三击（`click_count: 3`），水平滚动（`direction: "left" / "right"`） |
@@ -107,7 +107,7 @@ pnputil /delete-driver oem138.inf /uninstall /force
 即表示 `computer` 工具注册成功。虚拟屏是否就绪可随时查：
 
 ```
-npx dsh-pc-pilot       # 输出 [status] 驱动=True 画布=1920,0,1920,1080 即就绪
+npx dsh-pc-pilot       # 输出 [status] 驱动=True 画布=1920,1080,1366,768 即就绪
 ```
 
 ## 使用
@@ -128,7 +128,7 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 // 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_app_state 有效）
 ```
 
-### 动作参考（28 个动作）
+### 动作参考（31 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
@@ -148,6 +148,8 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 | `open_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点） / 动作间等待 | `name` / `duration_s` |
 | `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
+| `toggle_pip` / `isolate_window` | 显示/隐藏画中画悬浮窗 / 把窗口移入或移出虚拟画布 | `show` / `app`?、`restore` |
+| `setup_virtual_display` | 幂等安装+激活虚拟副屏（status/install/activate 分阶段） | `setup`? |
 
 > `app` 可以是 pid 数字、进程名或窗口标题子串；一个进程有多个窗口时用 `window_index`（1 起）消歧。
 
@@ -197,7 +199,7 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 
 - **能力边界**：该工具可读取窗口标题、无障碍树与截图，并可向用户应用注入输入。内置工具指引明确要求模型**只操作用户 explicitly 要求**的应用与窗口，未经明确指示**绝不**提交表单、发送消息、下单购买、删除数据或更改账号/设置。
 - **最小干扰**：后台动作绝不移动真实光标、绝不抢焦点；foreground 动作会——指引要求模型必须先说明再做。
-- **无网络、无遥测**：插件不发起任何网络请求；除 `%TEMP%\dsh-cua-*` 状态与诊断文件外不做任何持久化。
+- **最小网络、无遥测**：插件运行时不发起任何网络请求；唯一例外是虚拟副屏首次安装时下载一次驱动包（SHA256 + Authenticode 双重校验）；除 `%TEMP%\dsh-cua-*` 状态与诊断文件外不做任何持久化。
 - **开源可审计**：全部逻辑就在 `lib/` 与 `bin/` 的几个 PowerShell / JS 文件里，欢迎审阅。
 
 ## 故障排查

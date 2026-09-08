@@ -12,7 +12,7 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 
 ## Features
 
-- **One tool, full desktop (30 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`; workspace additions: `toggle_pip`, `isolate_window`, `setup_virtual_display`.
+- **One tool, full desktop (31 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`; workspace additions: `toggle_pip`, `isolate_window`, `setup_virtual_display`.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
 - **Occlusion-immune background clicks** — with an `app` specified, coordinate clicks aim at the target window's own UIA tree / hwnd, so a fully covered window can be operated unattended while the user keeps working on top.
 - **Rich mouse vocabulary** — left / right / middle clicks, double-click (`click_count: 2`), triple-click (`click_count: 3`), and horizontal scrolling (`direction: "left" / "right"`).
@@ -93,7 +93,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 3. Act on the state — `click_element { app, element }`, `set_value { app, element, value }`, `type { app, text }`, `key { app, key, modifiers }`, `scroll { app, x, y, amount, direction }`, `drag { app, from_x, from_y, to_x, to_y }`, `perform_action { app, element, perform }`, `select_text { app, element, start, length }`.
 4. Refresh the state after every UI change; element indexes are only valid for the `get_app_state` that produced them.
 
-### Action reference (28 actions)
+### Action reference (31 actions)
 
 | Action | Purpose |
 | --- | --- |
@@ -143,7 +143,7 @@ The helper is a single self-contained `computer-use-helper.ps1` copied to `%TEMP
 
 - The tool can read window titles, accessibility trees and screenshots, and can drive input into the user's applications. The bundled tool description instructs the model to operate **only** what the user explicitly asked for and to never submit forms, send messages, make purchases, delete data, or change account/settings without explicit instruction.
 - Background actions never move the user's cursor or steal focus. Foreground actions do — the guidance requires the model to say so.
-- No telemetry. The plugin itself performs no network access; the optional virtual-display setup downloads exactly one driver package, verified against a pinned SHA256 and an Authenticode signature before install. No persistence beyond `%TEMP%\dsh-cua-*` state files.
+- No telemetry. The plugin itself performs no network access; the virtual-display setup downloads exactly one driver package, verified against a pinned SHA256 and an Authenticode signature before install. No persistence beyond `%TEMP%\dsh-cua-*` state files.
 
 ## Troubleshooting
 

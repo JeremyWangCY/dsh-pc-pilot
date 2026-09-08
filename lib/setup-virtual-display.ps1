@@ -24,6 +24,7 @@ $script:result = [ordered]@{
   needs_manual = $false
   steps = @()
   message = ''
+  inf = ''                  # INF name (oemNNN.inf) resolved dynamically for the uninstall hint
 }
 
 Add-Type @'
@@ -78,12 +79,13 @@ public class DshSetupDisp {
     return "not_installed";
   }
 
-  // Detached parking spot: primary monitor rect + a wide diagonal gap, so the
-  // virtual canvas never shares an edge with the primary screen — a stray mouse
-  // push can't drift onto the AI's desktop; reaching it takes deliberate travel.
+  // Detached parking spot: bounding box of ALL attached physical monitors + a
+  // wide diagonal gap, so the virtual canvas never shares an edge with any real
+  // screen — a stray mouse push can't drift onto the AI's desktop.
   static int desiredX = -1, desiredY = -1;
   public static string ComputeDetachedPosition()
   {
+    int maxR = int.MinValue, maxB = int.MinValue; bool any = false;
     for (uint i = 0; i < 64; i++)
     {
       DISPLAY_DEVICE ad = new DISPLAY_DEVICE(); ad.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
@@ -92,11 +94,14 @@ public class DshSetupDisp {
       if (ad.DeviceString == "Virtual Display Driver") continue;
       DEVMODE pm = new DEVMODE(); pm.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODE));
       if (!EnumDisplaySettings(ad.DeviceName, 0xFFFFFFFF, ref pm)) continue;
-      desiredX = pm.dmPositionX + (int)pm.dmPelsWidth + 600;
-      desiredY = pm.dmPositionY + (int)pm.dmPelsHeight + 600;
-      return desiredX + "," + desiredY;
+      int r = pm.dmPositionX + (int)pm.dmPelsWidth; if (r > maxR) maxR = r;
+      int b = pm.dmPositionY + (int)pm.dmPelsHeight; if (b > maxB) maxB = b;
+      any = true;
     }
-    return "";
+    if (!any) return "";
+    desiredX = maxR + 600;
+    desiredY = maxB + 600;
+    return desiredX + "," + desiredY;
   }
 
   // Raise the VDD monitor to its preferred desktop mode AND park it at the
@@ -251,6 +256,22 @@ function Show-Status {
   $script:result.driver_installed = [bool]$dev
   $script:result.admin = Test-Admin
   $script:result.canvas = if ($state -in @('not_installed','device_no_monitor','device_no_mode')) { $null } else { $state }
+  if ($dev) {
+    # resolve the INF name dynamically — oemNNN.inf indices differ per machine;
+    # DEVPKEY_Device_DriverInfPath can be blank, so fall back to scanning the
+    # Windows INF folder for the package that carries this device description
+    $infName = ''
+    try { $infName = [string](Get-PnpDeviceProperty -InstanceId $dev -KeyName 'DEVPKEY_Device_DriverInfPath' -ErrorAction Stop).Value } catch { }
+    if (-not $infName) {
+      try {
+        $hit = Get-ChildItem "$env:SystemRoot\INF" -Filter 'oem*.inf' -ErrorAction Stop |
+          Where-Object { Select-String -Path $_.FullName -Pattern 'Virtual Display Driver' -SimpleMatch -List -Quiet } |
+          Select-Object -First 1
+        if ($hit) { $infName = $hit.Name }
+      } catch { }
+    }
+    $script:result['inf'] = $infName
+  }
   Write-Output ("[status] 驱动=$([bool]$dev) 画布=$($script:result.canvas) 管理员=$($script:result.admin)")
 }
 
@@ -307,7 +328,9 @@ if ($Banner) {
   if ($script:result.ok -and -not $script:result.needs_manual) {
     Write-Output ''
     Write-Output '[OK] 完成。AI 的窗口今后将停泊在这块隐形副屏上，主屏恢复自由。'
-    Write-Output '     如需卸载：pnputil /delete-driver oem138.inf /uninstall /force'
+    $inf = [string]$script:result['inf']
+    $uninstall = if ($inf) { "pnputil /delete-driver $inf /uninstall /force" } else { "pnputil /enum-drivers  # 找到 Virtual Display Driver 对应的 oemXX.inf 后 /delete-driver <它> /uninstall /force" }
+    Write-Output "     如需卸载：$uninstall"
   } elseif ($script:result.needs_manual) {
     Write-Output ''
     Write-Output '[..] 未完全就绪：按上方提示完成一次手动确认（通常只需按一次 Win+P 选『扩展』），然后重新运行 npx dsh-pc-pilot 验证。'

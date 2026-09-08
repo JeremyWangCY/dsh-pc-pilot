@@ -69,7 +69,18 @@ assert.ok(helperSrc.includes('function Get-DshVirtualCanvas'), 'helper must defi
 assert.ok(helperSrc.includes('function Move-WindowToCanvas'), 'helper must define Move-WindowToCanvas')
 assert.ok(helperSrc.includes('GetVddRect'), 'display enumeration must run inside C# (PowerShell DISPLAY_DEVICE marshaling fails silently)')
 
-// 6. cordis.patch.yml bundle registration stays in place
+// 6. runtime probe: the real setup script must run and emit a parseable DSHSETUP line
+import { spawnSync } from 'node:child_process'
+const probe = spawnSync('powershell.exe', [
+  '-NoProfile', '-ExecutionPolicy', 'Bypass',
+  '-File', path.join(repoDir, 'lib', 'setup-virtual-display.ps1'), '-Action', 'status',
+], { encoding: 'utf8', timeout: 60000, windowsHide: true })
+assert.ok(probe.stdout.includes('DSHSETUP'), 'runtime status must print the DSHSETUP tail line')
+const setupJson = JSON.parse(probe.stdout.split('DSHSETUP ')[1].trim())
+assert.equal(typeof setupJson.driver_installed, 'boolean', 'DSHSETUP must carry driver_installed')
+assert.equal(typeof setupJson.canvas, setupJson.driver_installed ? 'string' : 'object', 'DSHSETUP must carry canvas when the driver is present')
+
+// 7. cordis.patch.yml bundle registration stays in place
 assert.ok(fs.existsSync(path.join(repoDir, 'cordis.patch.yml')), 'cordis.patch.yml must exist')
 const patch = fs.readFileSync(path.join(repoDir, 'cordis.patch.yml'), 'utf8')
 assert.ok(patch.includes('id: computer-use') && patch.includes('name: dsh-pc-pilot'), 'bundle patch must register the computer-use host row')
