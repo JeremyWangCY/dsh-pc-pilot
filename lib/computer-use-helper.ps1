@@ -3079,6 +3079,11 @@ try {
   exit 0
 }
 
+# Guard for dot-sourcing (tests load this file to reuse DshWin32): without an
+# action or payload there is nothing to run — stay silent instead of emitting
+# an "unknown action" noise JSON into the caller's output.
+if (-not $Server -and -not $Action -and -not $rawJson) { exit 0 }
+
 $out = Invoke-ActionRequest -Action $Action -Payload $script:payload
 if ($out -is [System.Array] -and $out.Count -gt 0) { $out = $out[$out.Count - 1] }
 [Console]::Out.Write(($out | ConvertTo-Json -Depth 10 -Compress))

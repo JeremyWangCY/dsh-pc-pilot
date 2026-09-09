@@ -21,7 +21,7 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 单工具全桌面（31 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait`；工作区扩展：`toggle_pip` / `isolate_window` / `setup_virtual_display` |
+| 单工具全桌面（31 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait`；工作区扩展：`toggle_pip` / `isolate_window` / `setup_virtual_display`；窗口管理：`activate_window` / `close_window` / `get_window` |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 丰富鼠标词汇 | 左 / 右 / 中键，双击（`click_count: 2`）、三击（`click_count: 3`），水平滚动（`direction: "left" / "right"`） |
@@ -93,7 +93,8 @@ computer { "action": "setup_virtual_display", "setup": "status" }   // 只查状
 **卸载虚拟屏驱动**（不影响插件其余功能，但下次宿主启动会自动重新安装）：
 
 ```powershell
-pnputil /delete-driver oem138.inf /uninstall /force
+npx dsh-pc-pilot       # 输出末行 DSHSETUP 的 inf 字段即真实驱动 INF（如 oem137.inf）
+# 然后：pnputil /delete-driver <该 INF> /uninstall /force
 ```
 
 ### 验证安装

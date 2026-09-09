@@ -28,4 +28,8 @@ const res = spawnSync(ps, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 
   stdio: 'inherit',
   timeout: 300000,
 })
+if (res.error && res.error.code === 'ETIMEDOUT') {
+  console.error('dsh-pc-pilot setup timed out after 5 minutes (a pending UAC prompt blocks the installer).')
+  console.error('Approve or cancel the UAC dialog, then re-run this command to verify.')
+}
 process.exit(res.status ?? 1)

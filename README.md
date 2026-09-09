@@ -12,7 +12,7 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 
 ## Features
 
-- **One tool, full desktop (31 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`; workspace additions: `toggle_pip`, `isolate_window`, `setup_virtual_display`.
+- **One tool, full desktop (31 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`; workspace additions: `toggle_pip`, `isolate_window`, `setup_virtual_display`; window management: `activate_window`, `close_window`, `get_window`.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
 - **Occlusion-immune background clicks** — with an `app` specified, coordinate clicks aim at the target window's own UIA tree / hwnd, so a fully covered window can be operated unattended while the user keeps working on top.
 - **Rich mouse vocabulary** — left / right / middle clicks, double-click (`click_count: 2`), triple-click (`click_count: 3`), and horizontal scrolling (`direction: "left" / "right"`).
@@ -81,7 +81,8 @@ computer { "action": "setup_virtual_display", "setup": "status" }    // status o
 To uninstall the driver (the next host boot reinstalls it automatically):
 
 ```powershell
-pnputil /delete-driver oem138.inf /uninstall /force
+npx dsh-pc-pilot        # the uninstall hint names the exact INF (e.g. oem137.inf)
+# then: pnputil /delete-driver <that INF> /uninstall /force
 ```
 
 ## Usage
@@ -164,8 +165,5 @@ pwsh -File scripts/smoke-test.ps1
 The smoke test exercises helper actions (`list_apps`, `get_app_state`, background clicks) against a real window. To run the plugin from a local checkout, link it into a DSH profile as shown above.
 
 ## License
-
-[MIT](LICENSE)
-
 
 [MIT](LICENSE)

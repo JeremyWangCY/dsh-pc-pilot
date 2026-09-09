@@ -286,7 +286,7 @@ $breath.To = 0.35
 $breath.Duration = [TimeSpan]::FromSeconds(1.2)
 $breath.AutoReverse = $true
 $breath.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
-$liveDot.BeginAnimation([System.Windows.Media.UIElement]::OpacityProperty, $breath)
+$liveDot.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $breath)
 
 # State variables
 $script:isMini = $false
@@ -386,7 +386,7 @@ $timer.Add_Tick({
 
         if ($st.label) {
           $actionLabel.Text = [string]$st.label
-          $actionLabel.BeginAnimation([System.Windows.Media.UIElement]::OpacityProperty, $null)
+          $actionLabel.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $null)
           $actionLabel.Opacity = 1.0
           $script:labelAt = [DateTime]::Now
           $script:pillFaded = $false
@@ -459,7 +459,7 @@ $timer.Add_Tick({
   if (-not $script:pillFaded -and (([DateTime]::Now - $script:labelAt).TotalSeconds -gt 2.5)) {
     $script:pillFaded = $true
     $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, (New-Object System.Windows.Duration([TimeSpan]::FromMilliseconds(400))))
-    $actionLabel.BeginAnimation([System.Windows.Media.UIElement]::OpacityProperty, $fade)
+    $actionLabel.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
   }
 
   # flush the persisted PiP position after a drag (debounced by the 150ms tick)
