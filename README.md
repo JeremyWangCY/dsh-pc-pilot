@@ -12,7 +12,7 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 
 ## Features
 
-- **One tool, full desktop (31 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`; workspace additions: `toggle_pip`, `isolate_window`, `setup_virtual_display`; window management: `activate_window`, `close_window`, `get_window`.
+- **One tool, full desktop (32 actions)** — baseline: `list_apps`, `get_app_state`, `click_element`, `click`, `set_value`, `type`, `key`, `scroll`, `drag`, `open_app`, `read_clipboard`, `write_clipboard`, `mouse_down`, `mouse_up`, `hold_key`, `list_displays`; parity additions: `mouse_move`, `perform_action`, `select_text`, `screenshot`, `zoom`, `switch_display`, `cursor_position`, `list_windows`, `wait`; workspace additions: `toggle_pip`, `isolate_window`, `release_window`, `setup_virtual_display`; window management: `activate_window`, `close_window`, `get_window`.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
 - **Occlusion-immune background clicks** — with an `app` specified, coordinate clicks aim at the target window's own UIA tree / hwnd, so a fully covered window can be operated unattended while the user keeps working on top.
 - **Rich mouse vocabulary** — left / right / middle clicks, double-click (`click_count: 2`), triple-click (`click_count: 3`), and horizontal scrolling (`direction: "left" / "right"`).
@@ -94,7 +94,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 3. Act on the state — `click_element { app, element }`, `set_value { app, element, value }`, `type { app, text }`, `key { app, key, modifiers }`, `scroll { app, x, y, amount, direction }`, `drag { app, from_x, from_y, to_x, to_y }`, `perform_action { app, element, perform }`, `select_text { app, element, start, length }`.
 4. Refresh the state after every UI change; element indexes are only valid for the `get_app_state` that produced them.
 
-### Action reference (31 actions)
+### Action reference (32 actions)
 
 | Action | Purpose |
 | --- | --- |
@@ -111,7 +111,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `open_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); pause between actions |
 | `activate_window` / `close_window` / `get_window` | Bring window to foreground / graceful WM_CLOSE / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
-| `toggle_pip` / `isolate_window` | Show/hide the PiP overlay; park or restore a window on the virtual display canvas |
+| `toggle_pip` / `isolate_window` / `release_window` | Show/hide PiP overlay; park a window on virtual canvas, or release it (or all windows) back to the primary screen |
 | `setup_virtual_display` | One-command virtual display setup (`setup`: auto / status / install / activate) |
 
 ### Key parameters

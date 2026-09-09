@@ -1607,16 +1607,143 @@ public class DshDispEnum {
   return $rect
 }
 
+function Get-PlacementPath {
+  Join-Path (Join-Path $env:TEMP 'dsh-cua') 'canvas.placement.json'
+}
+
+function Get-PlacementTable {
+  $path = Get-PlacementPath
+  if (Test-Path $path) {
+    try {
+      $raw = Get-Content $path -Raw -ErrorAction Stop
+      if ($raw) {
+        $json = $raw | ConvertFrom-Json
+        $dict = @{}
+        foreach ($prop in $json.PSObject.Properties) {
+          $dict[$prop.Name] = $prop.Value
+        }
+        return $dict
+      }
+    } catch { }
+  }
+  return @{}
+}
+
+function Save-PlacementTable {
+  param($Table)
+  $path = Get-PlacementPath
+  $dir = [System.IO.Path]::GetDirectoryName($path)
+  if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  try {
+    $json = $Table | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText($path, $json, [System.Text.Encoding]::ASCII)
+  } catch { }
+}
+
+function Save-CanvasPlacement {
+  # Record where a window lived BEFORE we parked it on the canvas. Apps like
+  # Chromium persist per-profile window placement, so without this record the
+  # app would keep reopening on the virtual screen after we let it go.
+  param([IntPtr]$Hwnd, [string]$App)
+  $r = New-Object DshWin32+RECT
+  if (-not [DshWin32]::GetWindowRect($Hwnd, [ref]$r)) { return }
+  $onPrimary = ($r.Left -ge 0 -and $r.Top -ge 0 -and $r.Right -le 1920 -and $r.Bottom -le 1080)
+  $key = $Hwnd.ToInt64().ToString()
+  $table = Get-PlacementTable
+  if ($table.ContainsKey($key) -and $onPrimary -eq $false) { return }
+  $table[$key] = @{
+    app = $App
+    hwnd = $Hwnd.ToInt64()
+    x = $r.Left
+    y = $r.Top
+    w = ($r.Right - $r.Left)
+    h = ($r.Bottom - $r.Top)
+    on_primary = $onPrimary
+    ts = [DateTimeOffset]::Now.ToUnixTimeMilliseconds()
+  }
+  Save-PlacementTable -Table $table
+}
+
+function Restore-CanvasPlacement {
+  # Put a parked window back where the user had it (recorded at park time);
+  # without a record, fall back to a sensible primary-screen default.
+  param([IntPtr]$Hwnd, [string]$App)
+  $key = $Hwnd.ToInt64().ToString()
+  $table = Get-PlacementTable
+  $rec = $null
+  if ($table.ContainsKey($key)) {
+    $rec = $table[$key]
+    $table.Remove($key)
+    Save-PlacementTable -Table $table
+  } elseif ($App) {
+    foreach ($k in @($table.Keys)) {
+      if ($table[$k].app -eq $App) {
+        $rec = $table[$k]
+        $table.Remove($k)
+        Save-PlacementTable -Table $table
+        break
+      }
+    }
+  }
+  $x = 120; $y = 120; $w = 1400; $h = 900
+  if ($rec -and $rec.on_primary) {
+    $x = [int]$rec.x; $y = [int]$rec.y; $w = [int]$rec.w; $h = [int]$rec.h
+  }
+  [DshWin32]::SetWindowPos($Hwnd, [IntPtr]::Zero, $x, $y, $w, $h, 0x0050) | Out-Null
+  return "primary screen ($x, $y) $w x $h"
+}
+
+function Release-AllCanvasWindows {
+  $table = Get-PlacementTable
+  $count = 0
+  $vc = Get-DshVirtualCanvas
+  # 1. Release all tracked windows
+  foreach ($k in @($table.Keys)) {
+    $rec = $table[$k]
+    $h = [IntPtr][long]$rec.hwnd
+    $x = 120; $y = 120; $w = 1400; $hH = 900
+    if ($rec.on_primary) {
+      $x = [int]$rec.x; $y = [int]$rec.y; $w = [int]$rec.w; $hH = [int]$rec.h
+    }
+    try {
+      [DshWin32]::SetWindowPos($h, [IntPtr]::Zero, $x, $y, $w, $hH, 0x0050) | Out-Null
+      $count++
+    } catch { }
+  }
+  Save-PlacementTable -Table @{}
+
+  # 2. Sweep any top-level window whose coordinates sit on the virtual canvas
+  if ($vc) {
+    $wins = [DshWin32]::EnumWindowsList()
+    foreach ($w in $wins) {
+      $r = $w.Rect
+      if ($r.Left -ge $vc.x -and $r.Top -ge $vc.y) {
+        $pname = (Get-Process -Id $w.Pid -ErrorAction SilentlyContinue).ProcessName
+        if ($pname -in @('explorer', 'dwm', 'ShellExperienceHost')) { continue }
+        $nx = 120 + (($count * 30) % 200)
+        $ny = 120 + (($count * 30) % 200)
+        [DshWin32]::SetWindowPos($w.Hwnd, [IntPtr]::Zero, $nx, $ny, 1280, 800, 0x0050) | Out-Null
+        $count++
+      }
+    }
+  }
+  return $count
+}
+
 function Move-WindowToCanvas {
   # Show a window (without activation) and place it on the virtual display canvas when one
   # is active; fall back to the legacy off-desktop parking spot (3000, 0) otherwise.
-  param([IntPtr]$Hwnd, [int]$W = 1280, [int]$H = 800)
+  param([IntPtr]$Hwnd, [int]$W = 1280, [int]$H = 800, [string]$AppName = '')
   $vc = Get-DshVirtualCanvas
   if ($vc) {
+    # remember the pre-park placement so release_window can hand the app back
+    # (Chromium remembers where its window was last — never trap it on canvas)
+    try { Save-CanvasPlacement -Hwnd $Hwnd -App $AppName } catch { }
     [DshWin32]::ShowWindow($Hwnd, [DshWin32]::SW_SHOWNOACTIVATE) | Out-Null
     [DshWin32]::SetWindowPos($Hwnd, [IntPtr]::Zero, $vc.x, $vc.y, $W, $H, 0x0050) | Out-Null
     return "virtual canvas ($($vc.x), $($vc.y)) $($W)x$($H)"
   }
+  try { Save-CanvasPlacement -Hwnd $Hwnd -App $AppName } catch { }
   [DshWin32]::SetWindowPos($Hwnd, [IntPtr]::Zero, 3000, 0, $W, $H, 0x0050) | Out-Null
   return "legacy off-screen canvas (3000, 0)"
 }
@@ -2535,6 +2662,41 @@ function Invoke-ActionRequest {
       $cmd = Split-AppCommand -Name ([string]$name)
       $filePath = $cmd[0]
       $argList = @($cmd[1])
+
+      # Browser profile isolation: When launching Chromium browsers (msedge, chrome, brave),
+      # force a dedicated --user-data-dir so AI browsing NEVER pollutes the user's personal
+      # Edge profile, window placement, or cookies!
+      $baseExe = [System.IO.Path]::GetFileNameWithoutExtension($filePath).ToLowerInvariant()
+      $isChromiumBrowser = ($baseExe -in @('msedge', 'chrome', 'brave', 'chromium', 'vivaldi'))
+      if ($isChromiumBrowser) {
+        $hasUserDataDir = $false
+        foreach ($a in $argList) {
+          if ($a -match '^--user-data-dir') { $hasUserDataDir = $true; break }
+        }
+        if (-not $hasUserDataDir) {
+          $aiProfileDir = Join-Path $env:LOCALAPPDATA 'dsh-cua\browser-profile'
+          if (-not (Test-Path $aiProfileDir)) { New-Item -ItemType Directory -Path $aiProfileDir -Force | Out-Null }
+          $argList += "--user-data-dir=`"$aiProfileDir`""
+          $argList += "--no-first-run"
+          $argList += "--no-default-browser-check"
+        }
+        $isolateVal = Get-PayloadValue 'isolate'
+        $shouldIsolate = if ($null -ne $isolateVal) { [bool]$isolateVal } else { ((Get-Dispatch) -eq 'background') }
+        if ($shouldIsolate) {
+          $hasPos = $false
+          foreach ($a in $argList) {
+            if ($a -match '^--window-position') { $hasPos = $true; break }
+          }
+          if (-not $hasPos) {
+            $vc = Get-DshVirtualCanvas
+            if ($vc) {
+              $argList += "--window-position=$($vc.x),$($vc.y)"
+              $argList += "--window-size=1280,800"
+            }
+          }
+        }
+      }
+
       # Launch silently in background using -WindowStyle Minimized (direct at bottom, zero flicker/focus steal)
       $style = if (Get-PayloadValue 'activate' -or (Get-Dispatch) -eq 'foreground') { 'Normal' } else { 'Minimized' }
       $proc = if ($argList.Count -gt 0) {
@@ -2552,7 +2714,7 @@ function Invoke-ActionRequest {
         $isolateVal = Get-PayloadValue 'isolate'
         $shouldIsolate = if ($null -ne $isolateVal) { [bool]$isolateVal } else { ((Get-Dispatch) -eq 'background') }
         if ($shouldIsolate) {
-          $canvasNote = Move-WindowToCanvas -Hwnd ([IntPtr]$result.hwnd)
+          $canvasNote = Move-WindowToCanvas -Hwnd ([IntPtr]$result.hwnd) -AppName ([string]$name)
           $result.canvas = $canvasNote
         }
       }
@@ -2983,13 +3145,31 @@ function Invoke-ActionRequest {
       $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
       $restore = Get-PayloadValue 'restore'
       if ($restore) {
-        [DshWin32]::SetWindowPos($win.Hwnd, [IntPtr]::Zero, 100, 100, 1280, 800, 0x0050) | Out-Null
-        $result.message = "Restored window to primary screen (100, 100)"
+        $backNote = Restore-CanvasPlacement -Hwnd $win.Hwnd -App ([string]$app)
+        $result.message = "Released window back to $backNote"
       } else {
-        $canvasNote = Move-WindowToCanvas -Hwnd $win.Hwnd
+        $canvasNote = Move-WindowToCanvas -Hwnd $win.Hwnd -AppName ([string]$app)
         $result.message = "Moved window to isolated $canvasNote"
       }
       $result.window = (Get-WindowInfo $win)
+    }
+
+    'release_window' {
+      # hand a canvas-parked window back to the user's primary screen, restoring
+      # the placement recorded at park time so apps like Edge/Chromium re-learn
+      # their primary-screen position instead of reopening on the virtual display
+      $app = Get-PayloadValue 'app'
+      $all = Get-PayloadValue 'all'
+      if ($all -or -not $app -or $app -eq 'all') {
+        $c = Release-AllCanvasWindows
+        $result.message = "Released all canvas windows to primary screen ($c window(s) moved)"
+        $result.released_count = $c
+      } else {
+        $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+        $backNote = Restore-CanvasPlacement -Hwnd $win.Hwnd -App ([string]$app)
+        $result.message = "Released window to $backNote"
+        $result.window = (Get-WindowInfo $win)
+      }
     }
 
     default {

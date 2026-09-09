@@ -68,6 +68,12 @@ assert.ok(helperSrc.includes('setup-virtual-display.ps1'), 'helper must invoke t
 assert.ok(helperSrc.includes('function Get-DshVirtualCanvas'), 'helper must define Get-DshVirtualCanvas')
 assert.ok(helperSrc.includes('function Move-WindowToCanvas'), 'helper must define Move-WindowToCanvas')
 assert.ok(helperSrc.includes('GetVddRect'), 'display enumeration must run inside C# (PowerShell DISPLAY_DEVICE marshaling fails silently)')
+assert.ok(helperSrc.includes('function Save-CanvasPlacement'), 'helper must save window placement before parking')
+assert.ok(helperSrc.includes('function Restore-CanvasPlacement'), 'helper must restore window placement on release')
+assert.ok(helperSrc.includes('function Release-AllCanvasWindows'), 'helper must implement bulk canvas window release')
+assert.ok(helperSrc.includes("'release_window'"), 'helper must support release_window action')
+assert.ok(helperSrc.includes('--user-data-dir'), 'helper open_app must isolate Chromium browser profiles')
+assert.ok(indexSrc.includes("'release_window'"), 'index.js must expose release_window action in enum')
 
 // 6. runtime probe: the real setup script must run and emit a parseable DSHSETUP line
 import { spawnSync } from 'node:child_process'

@@ -21,7 +21,7 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 单工具全桌面（31 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait`；工作区扩展：`toggle_pip` / `isolate_window` / `setup_virtual_display`；窗口管理：`activate_window` / `close_window` / `get_window` |
+| 单工具全桌面（32 个动作） | 基线：`list_apps` / `get_app_state` / `click_element` / `click` / `set_value` / `type` / `key` / `scroll` / `drag` / `open_app` / `read_clipboard` / `write_clipboard` / `mouse_down` / `mouse_up` / `hold_key` / `list_displays`；对齐补齐：`mouse_move` / `perform_action` / `select_text` / `screenshot` / `zoom` / `switch_display` / `cursor_position` / `list_windows` / `wait`；工作区扩展：`toggle_pip` / `isolate_window` / `release_window` / `setup_virtual_display`；窗口管理：`activate_window` / `close_window` / `get_window` |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 丰富鼠标词汇 | 左 / 右 / 中键，双击（`click_count: 2`）、三击（`click_count: 3`），水平滚动（`direction: "left" / "right"`） |
@@ -129,7 +129,7 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 // 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_app_state 有效）
 ```
 
-### 动作参考（31 个动作）
+### 动作参考（32 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
@@ -149,7 +149,7 @@ computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
 | `open_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点） / 动作间等待 | `name` / `duration_s` |
 | `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
-| `toggle_pip` / `isolate_window` | 显示/隐藏画中画悬浮窗 / 把窗口移入或移出虚拟画布 | `show` / `app`?、`restore` |
+| `toggle_pip` / `isolate_window` / `release_window` | 显示/隐藏画中画悬浮窗 / 把窗口移入虚拟画布，或把画布窗口（单个或全部）释放回主屏 | `show` / `app`?、`restore`、`all`? |
 | `setup_virtual_display` | 幂等安装+激活虚拟副屏（status/install/activate 分阶段） | `setup`? |
 
 > `app` 可以是 pid 数字、进程名或窗口标题子串；一个进程有多个窗口时用 `window_index`（1 起）消歧。
