@@ -3062,10 +3062,15 @@ if ($Server) {
 }
 
 # ---------------------------------------------------------------- one-shot fallback (no -Server)
+# Guard for dot-sourcing (tests load this file to reuse DshWin32) AND for stray
+# no-arg runs: without an action there is nothing to run — exit BEFORE touching
+# stdin, so a redirected-but-open stdin can never block us at ReadToEnd.
+if (-not $Server -and -not $Action) { exit 0 }
+
 $script:payload = $null
 $rawJson = ''
 try {
-  if ($PayloadStdin -or ((-not $PayloadJson) -and [Console]::IsInputRedirected)) {
+  if ($PayloadStdin -or [Console]::IsInputRedirected) {
     $rawJson = [Console]::In.ReadToEnd()
   }
   if ((-not $rawJson) -and $PayloadJson) {
@@ -3078,11 +3083,6 @@ try {
   @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
   exit 0
 }
-
-# Guard for dot-sourcing (tests load this file to reuse DshWin32): without an
-# action or payload there is nothing to run — stay silent instead of emitting
-# an "unknown action" noise JSON into the caller's output.
-if (-not $Server -and -not $Action -and -not $rawJson) { exit 0 }
 
 $out = Invoke-ActionRequest -Action $Action -Payload $script:payload
 if ($out -is [System.Array] -and $out.Count -gt 0) { $out = $out[$out.Count - 1] }

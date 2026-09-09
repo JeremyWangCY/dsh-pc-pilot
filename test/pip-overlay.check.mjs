@@ -24,6 +24,7 @@ assert.ok(pipSrc.includes('ShowActivated="False"'), 'Must specify ShowActivated=
 assert.ok(pipSrc.includes('Focusable="False"'), 'Must specify Focusable="False"')
 assert.ok(pipSrc.includes('[System.Windows.SystemParameters]::WorkArea'), 'Must use pure WPF SystemParameters for screen bounds')
 assert.ok(!pipSrc.includes('System.Drawing'), 'Must not import unused System.Drawing')
+assert.ok(!pipSrc.includes('System.Windows.Media.UIElement'), 'Must not reference the nonexistent System.Windows.Media.UIElement type (Round-3 crash regression guard)')
 assert.ok(pipSrc.includes('Live'), 'Must include Live status pill')
 assert.ok(pipSrc.includes('CaptureRectWithCursor'), 'Must composite the AI virtual cursor into the canvas mirror')
 assert.ok(pipSrc.includes('cursor.state'), 'Must read the AI virtual cursor state file')
