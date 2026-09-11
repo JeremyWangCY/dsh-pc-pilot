@@ -114,7 +114,7 @@ try {
   assert.ok(fixtureHwnd > 0, 'owned fixture must have a valid hwnd')
   // Background observation must never implicitly restore a minimized window.
   // Set up only this owned fixture explicitly before testing background input.
-  const prepared = await tool.execute({ action: 'get_window_state', hwnd: fixtureHwnd, screenshot: false, dispatch: 'foreground' })
+  const prepared = await tool.execute({ action: 'get_window_state', hwnd: fixtureHwnd, screenshot: false, include_text: true, dispatch: 'foreground' })
   assert.equal(prepared.ok, true, JSON.stringify(prepared))
 
   // 3a. get_window by app
@@ -163,7 +163,7 @@ try {
   assert.equal(chordHoldRes.ok, true, `background hold_key ctrl+shift+p must succeed: ${JSON.stringify(chordHoldRes)}`)
 
   // 3c-2. Click with element parameter (resolves element coordinates, not top-left)
-  const clickState = await tool.execute({ action: 'get_window_state', app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}), screenshot: false })
+  const clickState = await tool.execute({ action: 'get_window_state', app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}), screenshot: false, include_text: true })
   assert.equal(clickState.ok, true, `fresh state before element click must succeed: ${JSON.stringify(clickState)}`)
   const clickElement = clickState.elements.find(element => element.enabled && !element.offscreen && /^(最小化|Minimize)$/.test(element.name))
   assert.ok(clickElement, `fresh state must expose minimize: ${JSON.stringify(clickState.elements.map(e => ({ name:e.name, role:e.role, invokable:e.invokable, enabled:e.enabled, offscreen:e.offscreen })))}`)

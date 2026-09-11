@@ -380,6 +380,54 @@ function Get-DocumentText {
   return ''
 }
 
+function Get-FocusedElementText {
+  param([IntPtr]$Hwnd)
+  try {
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -eq $focused) { return '' }
+    $cur = $focused.Current
+    $index = 0
+    if ($null -ne $script:cachedElements) {
+      $focusedId = [string]($focused.GetRuntimeId() -join '.')
+      for ($i = 0; $i -lt $script:cachedElements.Count; $i++) {
+        if ([string]($script:cachedElements[$i].GetRuntimeId() -join '.') -ceq $focusedId) {
+          $index = $i + 1
+          break
+        }
+      }
+    }
+    # A focus outside this window must not be reported as target context. A
+    # provider may expose zero NativeWindowHandle, but an indexed match proves
+    # it came from the tree we just captured.
+    $native = [IntPtr]$cur.NativeWindowHandle
+    if ($index -eq 0 -and $native -ne [IntPtr]::Zero -and $native -ne $Hwnd -and -not [DshWin32]::IsChild($Hwnd, $native)) { return '' }
+    if ($index -eq 0 -and $native -eq [IntPtr]::Zero) { return '' }
+    $label = "$($cur.ControlType.ProgrammaticName): $($cur.Name)"
+    return if ($index -gt 0) { "[$index] $label" } else { $label }
+  } catch { return '' }
+}
+
+function Get-SelectedText {
+  param([IntPtr]$Hwnd, [int]$MaxLen = 3000)
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $candidates = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
+    $candidates.Add($root)
+    $descendants = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    for ($i = 0; $i -lt $descendants.Count; $i++) { $candidates.Add($descendants[$i]) }
+    foreach ($element in $candidates) {
+      $pattern = $null
+      if (-not $element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) { continue }
+      $selection = @($pattern.GetSelection())
+      if ($selection.Count -gt 0) {
+        $text = $selection[0].GetText($MaxLen)
+        if ($text) { return $text }
+      }
+    }
+  } catch { }
+  return ''
+}
+
 # ---------------------------------------------------------------- overlay + background dispatch
 
 function Ensure-OverlayProcess {

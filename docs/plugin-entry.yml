@@ -1,10 +1,10 @@
 # awesome-dsh-plugin catalog entry (data/plugins/JeremyWangCY__dsh-pc-pilot.yml)
 # Listing requirements met: public repo, age > 1 day, >= 10 commits, package.json declares dsh.bundle.
-url: https://github.com/JeremyWangCY/PC-Pilot
+url: https://github.com/JeremyWangCY/dsh-pc-pilot
 name: dsh-pc-pilot
 owner: JeremyWangCY
 category: tools
 description:
-  en: "Windows computer-use for DeepSeek Harness: one 'computer' tool with the standard click/double-click/drag/move/scroll/keypress/type/wait/screenshot actions, ordered batches, UIA accessibility targeting, state-bound coordinates, current PNG observations, background synthetic input (never steals focus), and real SendInput when required. Screenshots are occlusion-immune per-window captures (Windows Graphics Capture bridge, PrintWindow ladder) with no screen-DC degradation; running activity is shown in a frosted status pill with a breathing dot."
-  zh: "适用于 DeepSeek Harness 的 Windows 电脑操作插件：单一 computer 工具支持标准点击/双击/拖拽/移动/滚动/按键/输入/等待/截图动作、顺序批处理、UIA 无障碍定位、绑定状态的坐标、最新 PNG 观察、后台合成输入（不抢焦点），必要时使用真实 SendInput；截图全部遮挡免疫（Windows Graphics Capture 桥 + PrintWindow 阶梯，无屏幕 DC 降级），运行期间屏幕上方显示毛玻璃状态条与呼吸灯点。"
-tarball: https://github.com/JeremyWangCY/PC-Pilot/releases/download/v0.1.0-beta.1/dsh-pc-pilot-0.1.0-beta.1.tgz
+  en: "Windows computer-use for DeepSeek Harness. The computer tool uses ChatGPT Windows Computer Use action names, reusable window targets, UI Automation, occlusion-immune window screenshots, background-first verified input, and an isolated Chromium browser route."
+  zh: "适用于 DeepSeek Harness 的 Windows 电脑操作插件。computer 工具采用 ChatGPT Windows Computer Use 动作名称，支持可复用窗口目标、UIA 无障碍定位、遮挡免疫窗口截图、后台优先的验证输入和隔离 Chromium 浏览器通道。"
+tarball: https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.0/dsh-pc-pilot-0.3.0.tgz

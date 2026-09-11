@@ -1119,6 +1119,54 @@ function Get-DocumentText {
   return ''
 }
 
+function Get-FocusedElementText {
+  param([IntPtr]$Hwnd)
+  try {
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -eq $focused) { return '' }
+    $cur = $focused.Current
+    $index = 0
+    if ($null -ne $script:cachedElements) {
+      $focusedId = [string]($focused.GetRuntimeId() -join '.')
+      for ($i = 0; $i -lt $script:cachedElements.Count; $i++) {
+        if ([string]($script:cachedElements[$i].GetRuntimeId() -join '.') -ceq $focusedId) {
+          $index = $i + 1
+          break
+        }
+      }
+    }
+    # A focus outside this window must not be reported as target context. A
+    # provider may expose zero NativeWindowHandle, but an indexed match proves
+    # it came from the tree we just captured.
+    $native = [IntPtr]$cur.NativeWindowHandle
+    if ($index -eq 0 -and $native -ne [IntPtr]::Zero -and $native -ne $Hwnd -and -not [DshWin32]::IsChild($Hwnd, $native)) { return '' }
+    if ($index -eq 0 -and $native -eq [IntPtr]::Zero) { return '' }
+    $label = "$($cur.ControlType.ProgrammaticName): $($cur.Name)"
+    return if ($index -gt 0) { "[$index] $label" } else { $label }
+  } catch { return '' }
+}
+
+function Get-SelectedText {
+  param([IntPtr]$Hwnd, [int]$MaxLen = 3000)
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $candidates = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
+    $candidates.Add($root)
+    $descendants = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    for ($i = 0; $i -lt $descendants.Count; $i++) { $candidates.Add($descendants[$i]) }
+    foreach ($element in $candidates) {
+      $pattern = $null
+      if (-not $element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) { continue }
+      $selection = @($pattern.GetSelection())
+      if ($selection.Count -gt 0) {
+        $text = $selection[0].GetText($MaxLen)
+        if ($text) { return $text }
+      }
+    }
+  } catch { }
+  return ''
+}
+
 # ---------------------------------------------------------------- overlay + background dispatch
 
 function Ensure-OverlayProcess {
@@ -1773,7 +1821,7 @@ function Invoke-WgcCapture {
 }
 
 function Do-AppState {
-  param([string]$App, [int]$WindowIndex, [bool]$WithScreenshot, [string]$Dispatch)
+  param([string]$App, [int]$WindowIndex, [bool]$WithScreenshot, [bool]$WithText, [string]$Dispatch)
   $script:observation = $null
   $win = Resolve-TargetWindow -App $App -Index $WindowIndex
   if ($Dispatch -eq 'foreground') {
@@ -1871,16 +1919,31 @@ function Do-AppState {
     }
     }
   }
-  $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-  # DESK-03: a freshly launched Win11 Notepad populates its UIA tree late and can
-  # expose only the root pane (2 elements) for a while. One short retry turns
-  # that into the full tree without a second model round-trip.
-  if ($tree.Count -le 2) {
-    Start-Sleep -Milliseconds 250
-    $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-    if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+  # A screenshot-only observation is the native Computer Use default.  Avoid
+  # walking a potentially huge UIA tree unless the caller specifically needs
+  # element indexes or document text; this keeps canvas/Chromium observations
+  # responsive while preserving screenshot-id coordinate binding below.
+  $tree = @()
+  $docText = ''
+  $focusedElement = ''
+  $selectedText = ''
+  $script:cachedTreeHwnd = [IntPtr]::Zero
+  $script:cachedElements = $null
+  $script:cachedIdentities = $null
+  if ($WithText) {
+    $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+    # DESK-03: a freshly launched Win11 Notepad populates its UIA tree late and can
+    # expose only the root pane (2 elements) for a while. One short retry turns
+    # that into the full tree without a second model round-trip.
+    if ($tree.Count -le 2) {
+      Start-Sleep -Milliseconds 250
+      $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+      if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+    }
+    $docText = Get-DocumentText $win.Hwnd
+    $focusedElement = Get-FocusedElementText $win.Hwnd
+    $selectedText = Get-SelectedText $win.Hwnd
   }
-  $docText = Get-DocumentText $win.Hwnd
   $script:observation = @{ id = [guid]::NewGuid().ToString('N'); hwnd = $win.Hwnd; rect = $win.Rect; created = [DateTime]::UtcNow }
   $script:lastScreenshot = $null
   if ($shot) {
@@ -1899,7 +1962,9 @@ function Do-AppState {
     elements = $tree
     element_count = $tree.Count
     document_text = if ($docText) { $docText } else { '' }
-    note = 'Element indexes are only valid together with this state; refresh after any UI change.'
+    focused_element = if ($focusedElement) { $focusedElement } else { '' }
+    selected_text = if ($selectedText) { $selectedText } else { '' }
+    note = if ($WithText) { 'Element indexes are only valid together with this state; refresh after any UI change.' } else { 'Screenshot-only state: request include_text:true before using element_index.' }
   }
 }
 
@@ -2199,7 +2264,9 @@ function Invoke-ActionRequest {
       $idx = [int](Get-PayloadValue 'window_index')
       $shot = Get-PayloadValue 'screenshot'
       if ($null -eq $shot) { $shot = $true }
-      $st = Do-AppState -App $app -WindowIndex $idx -WithScreenshot ([bool]$shot) -Dispatch (Get-Dispatch)
+      $withText = Get-PayloadValue 'include_text'
+      if ($null -eq $withText) { $withText = $false }
+      $st = Do-AppState -App $app -WindowIndex $idx -WithScreenshot ([bool]$shot) -WithText ([bool]$withText) -Dispatch (Get-Dispatch)
       $result.window = $st.window
       $result.snapshot_id = $st.snapshot_id
       $result.screenshot_id = $st.screenshot_id
@@ -2209,6 +2276,17 @@ function Invoke-ActionRequest {
       $result.element_count = $st.element_count
       $result.document_text = $st.document_text
       $result.note = $st.note
+      $result.accessibility = if ([bool]$withText) {
+        # Match the native Computer Use presentation: a compact, copyable tree
+        # for model reasoning while retaining the richer `elements` array for
+        # DSH callers that need structured fields.
+        $treeLines = @($st.elements | ForEach-Object {
+          $line = "[$($_.index)] $($_.role): $($_.name)"
+          if ($_.value) { $line += " = $($_.value)" }
+          $line
+        })
+        @{ tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text }
+      } else { $null }
       $result.dispatch = (Get-Dispatch)
       $result.message = "State captured for '$app' ($($st.element_count) elements)"
       if ($st.screenshot -and $st.screenshot.error) { $result.message += ' [' + $st.screenshot.error + ']' }

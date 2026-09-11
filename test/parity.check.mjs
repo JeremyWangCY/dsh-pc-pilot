@@ -49,6 +49,22 @@ assert.deepEqual(params.direction.enum, ['down', 'up', 'left', 'right'])
 
 // 2. Live round-trips (read-only / no side effects on the user's session)
 
+// list_apps: canonical app identifiers must be directly reusable and each
+// returned window must retain the standard Window { id, app } shape.
+const listAppsRes = await tool.execute({ action: 'list_apps' })
+assert.equal(listAppsRes.ok, true, `list_apps should succeed: ${JSON.stringify(listAppsRes)}`)
+assert.ok(Array.isArray(listAppsRes.apps), 'list_apps must return an apps array')
+for (const app of listAppsRes.apps) {
+  assert.equal(typeof app.id, 'string', 'a running app must expose a reusable string id')
+  assert.equal(typeof app.displayName, 'string', 'a running app must expose displayName')
+  assert.equal(app.isRunning, true, 'list_apps only reports running applications')
+  assert.ok(Array.isArray(app.windows), 'a running app must expose a windows array')
+  for (const window of app.windows) {
+    assert.equal(typeof window.id, 'number', 'a returned window must expose its opaque id')
+    assert.equal(typeof window.app, 'string', 'a returned window must expose its owning app')
+  }
+}
+
 // cursor_position: numeric position + 1-based display
 const cursorRes = await tool.execute({ action: 'cursor_position' })
 assert.ok(cursorRes, 'cursor_position must return a result object')
@@ -114,7 +130,7 @@ const stateCandidates = [...listWinRes.windows]
   .slice(0, 4)
 let stateRes = null
 for (const cand of stateCandidates) {
-  const res = await tool.execute({ action: 'get_window_state', app: String(cand.pid), hwnd: cand.hwnd, screenshot: true })
+  const res = await tool.execute({ action: 'get_window_state', app: String(cand.pid), hwnd: cand.hwnd, screenshot: true, include_text: true })
   if (res.ok && Array.isArray(res.elements) && res.elements.length > 0 &&
       res.screenshot && typeof res.screenshot.path === 'string' && res.screenshot.path.length > 0) { stateRes = res; break }
 }

@@ -28,16 +28,32 @@ try {
   notepadPid = openRes.pid
   assert.ok(Number.isInteger(notepadPid) && notepadPid > 0, 'scratch notepad must be spawned for the dynamic cache test')
 
+  const screenshotOnly = await tool.execute({
+    action: 'get_window_state',
+    app: String(notepadPid),
+    screenshot: false,
+    include_text: false,
+    dispatch: 'foreground',
+  })
+  assert.equal(screenshotOnly.ok, true, `screenshot-first state must succeed: ${JSON.stringify(screenshotOnly.message)}`)
+  assert.equal(screenshotOnly.accessibility, null, 'include_text:false must not return an accessibility tree')
+  assert.deepEqual(screenshotOnly.screenshots, [], 'a state without a capture must retain the canonical empty screenshots array')
+  assert.deepEqual(screenshotOnly.elements, [], 'include_text:false must not build element indexes')
+
   const stateRes = await tool.execute({
     action: 'get_window_state',
     app: String(notepadPid),
     screenshot: false,
+    include_text: true,
     // Explicit test setup may restore only the scratch window, without activation.
     dispatch: 'foreground',
   })
   assert.ok(stateRes.ok, `get_app_state on scratch notepad should succeed: ${JSON.stringify(stateRes.message)}`)
   assert.ok(Array.isArray(stateRes.elements) && stateRes.elements.length > 0,
     'scratch notepad must expose a non-empty element tree (get_app_state must have cached it)')
+  assert.equal(typeof stateRes.accessibility?.tree, 'string', 'include_text:true must expose the native-style formatted accessibility tree')
+  assert.equal(typeof stateRes.accessibility?.focused_element, 'string', 'include_text:true must expose focused-element context when the provider can identify it')
+  assert.equal(typeof stateRes.accessibility?.selected_text, 'string', 'include_text:true must expose selected-text context when the provider supports it')
 
   const elIndex = stateRes.elements[0].index
   const t0 = performance.now()

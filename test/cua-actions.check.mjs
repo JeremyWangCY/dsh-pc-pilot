@@ -17,6 +17,8 @@ assert.ok(parameters.path.oneOf, 'path must accept both drag paths and zoom scre
 assert.equal(parameters.actions.type, 'array')
 assert.equal(parameters.action.required, undefined, 'action is optional when an ordered actions array is supplied')
 assert.ok(parameters.url, 'computer schema must expose initial browser URL')
+assert.ok(parameters.include_text, 'computer schema must expose screenshot-first include_text control')
+assert.match(parameters.include_text.description, /default false/i)
 
 assert.deepEqual(normalizeComputerAction({ action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0 }).args, {
   action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0, scroll_x: 240, scroll_y: 0, amount: 2, direction: 'right',
@@ -26,6 +28,9 @@ assert.deepEqual(normalizeComputerAction({ action: 'drag', path: [[1, 2], [30, 4
 })
 assert.equal(normalizeComputerAction({ action: 'click', keys: ['CTRL'], x: 1, y: 2 }).args.modifiers, 'CTRL')
 assert.equal(normalizeComputerAction({ action: 'click', screenshotId: 'shot-1' }).args.screenshot_id, 'shot-1')
+assert.equal(normalizeComputerAction({ action: 'click', mouse_button: 'l' }).args.button, 'left')
+assert.equal(normalizeComputerAction({ action: 'click', mouse_button: 'r' }).args.button, 'right')
+assert.equal(normalizeComputerAction({ action: 'click', mouse_button: 'm' }).args.button, 'middle')
 assert.deepEqual(normalizeComputerAction({ action: 'get_window_state', window: { id: 42, app: 'notepad.exe' }, include_screenshot: false }), {
   requestedAction: 'get_window_state', action: 'get_window_state', args: { action: 'get_window_state', window: { id: 42, app: 'notepad.exe' }, include_screenshot: false, hwnd: 42, app: 'notepad.exe', screenshot: false },
 })
@@ -37,6 +42,19 @@ assert.equal(normalizeComputerAction({ action: 'type_text', text: 'hello' }).act
 assert.deepEqual(normalizeComputerAction({ action: 'perform_secondary_action', secondary_action: 'expand' }), {
   requestedAction: 'perform_secondary_action', action: 'perform_secondary_action', args: { action: 'perform_secondary_action', secondary_action: 'expand' },
 })
+assert.equal(normalizeComputerAction({ action: 'perform_secondary_action', secondary_action: 'Scroll Down' }).args.secondary_action, 'scroll_down')
+assert.equal(normalizeComputerAction({ action: 'perform_secondary_action', secondary_action: 'scroll-left' }).args.secondary_action, 'scroll_left')
 assert.equal(parameters.screenshot_id.type, 'string')
+
+for (const request of [
+  { action: 'press_key', key: 'Meta+R' },
+  { action: 'hold_key', key: 'Command+space' },
+  { action: 'click', x: 1, y: 1, keys: ['Win'] },
+]) {
+  const denied = await tool.execute(request)
+  assert.equal(denied.ok, false, `system-key request must be refused: ${JSON.stringify(request)}`)
+  assert.equal(denied.error_code, 'unsupported_system_key')
+  assert.equal(denied.outcome, 'not_executed')
+}
 
 console.log('canonical computer-use actions check PASSED')

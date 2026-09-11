@@ -72,7 +72,7 @@ foreach ($extra in @(@{expected_name=$null},@{expected_name=''},@{expected_name=
  Reset-Fixture; $null=Must-Reject $extra
 }
 Reset-Fixture; $r=Must-Reject @{expected_name=$null}
-if ($script:scans -ne 0 -or $r.message -notmatch 'get_app_state.*click_element') { throw 'missing expectation must fail before scanning with recovery guidance' }
+if ($script:scans -ne 0 -or $r.message -notmatch 'get_window_state.*element_index') { throw 'missing expectation must fail before scanning with recovery guidance' }
 foreach ($caseMode in @('none','moves')) { Reset-Fixture; $script:mode=$caseMode; $null=Must-Reject @{} }
 Reset-Fixture; $script:owned=$false; $null=Must-Reject @{}
 Reset-Fixture; $script:el.Current.IsEnabled=$false; $null=Must-Reject @{}

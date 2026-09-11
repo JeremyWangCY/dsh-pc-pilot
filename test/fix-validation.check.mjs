@@ -89,7 +89,7 @@ try {
   assert.equal(gwInit.window.foreground, false, 'scratch notepad launched silently must NOT be in foreground')
 
   // 2b. Test get_app_state: verify elements have both rect and screen_rect
-  const stateRes = await tool.execute({ action: 'get_window_state', app: String(notepadPid), hwnd: notepadHwnd, screenshot: false, dispatch: 'foreground' })
+  const stateRes = await tool.execute({ action: 'get_window_state', app: String(notepadPid), hwnd: notepadHwnd, screenshot: false, include_text: true, dispatch: 'foreground' })
   assert.equal(stateRes.ok, true, 'get_app_state must succeed')
   assert.ok(Array.isArray(stateRes.elements) && stateRes.elements.length > 0, 'elements must not be empty')
   const el0 = stateRes.elements[0]

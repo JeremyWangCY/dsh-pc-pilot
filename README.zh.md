@@ -59,7 +59,7 @@
 在 DSH profile 目录（`~/.dsh/profiles/web`）内执行：
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.2.0/dsh-pc-pilot-0.2.0.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.0/dsh-pc-pilot-0.3.0.tgz
 ```
 
 确认 profile 的 `package.json` 中 `dsh.profile.bundles` 数组包含 `"dsh-pc-pilot"`（市场安装会自动加入；手动安装需自行添加），然后重启 DSH 宿主。
@@ -99,40 +99,40 @@ overlay 默认开启（`overlay: true`）。每个动作序列的第一次活动
 // 1. 看看有哪些应用
 computer { "action": "list_apps" }
 
-// 2. 读取目标应用的结构化状态 + 截图
-computer { "action": "get_app_state", "app": "Notepad", "screenshot": true }
+// 2. 读取目标窗口的截图；需要元素索引时显式请求 UIA 文本
+computer { "action": "get_window_state", "window": { "id": 12345, "app": "notepad" }, "include_screenshot": true, "include_text": true }
 
 // 3. 依据状态执行动作（元素 index 来自上一步）
-computer { "action": "click_element", "app": "Notepad", "element": 7 }
-computer { "action": "type", "app": "Notepad", "text": "Hello, PC-Pilot!" }
+computer { "action": "click", "window": { "id": 12345, "app": "notepad" }, "element_index": 7, "snapshot_id": "<上一步返回的 id>" }
+computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "text": "Hello, PC-Pilot!" }
 
-// 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_app_state 有效）
+// 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_window_state 有效）
 ```
 
-### 动作参考（35 个动作）
+### 动作参考（41 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
 | `list_apps` / `list_windows` / `list_displays` | 列出运行中的应用 / 单应用多窗口 / 显示器拓扑 | 无 / `app`? / 无 |
-| `get_app_state` | 构建目标窗口的索引化无障碍树，可选截图；应用支持时附带 `document_text` | `app`、`screenshot` |
-| `click` / `double_click` / `click_element` | 标准坐标点击 / 双击，或绑定快照的 UIA 元素点击 | `x`、`y`、`button`；元素动作还需 `app`、`element`、`snapshot_id` |
-| `set_value` | 直接设置元素文本值（UIA ValuePattern） | `app`、`element`、`value` |
-| `type` | 逐字输入文本；可指定 `element` 定向投递 | `app`?、`text`、`element`? |
-| `perform_action` | 对元素执行命名 UIA 动作（invoke / toggle / select / expand / collapse / focus / scroll_*） | `app`、`element`、`perform` |
+| `get_window_state` | 默认截图优先；`include_text: true` 时构建索引化无障碍树并附带 `document_text` | `window`、`include_screenshot`、`include_text` |
+| `click` | 标准坐标、左右/中键与多击，或绑定快照的 UIA 元素点击 | `window`、`x`、`y`、`mouse_button`、`click_count`；元素动作还需 `element_index`、`snapshot_id` |
+| `set_value` | 直接替换元素文本值（UIA ValuePattern） | `window`、`element_index`、`snapshot_id`、`value` |
+| `type_text` | 向已验证焦点输入文本 | `window`、`text` |
+| `perform_secondary_action` | 对元素执行命名 UIA 动作（invoke / toggle / select / expand / collapse / focus / scroll_*） | `window`、`element_index`、`snapshot_id`、`secondary_action` |
 | `select_text` | 选中元素文本范围（TextPattern）；`length: 0` 仅定位光标 | `app`、`element`、`start`、`length` |
-| `keypress` / `key` / `hold_key` | 标准 `keys` 组合键、旧式组合键与定时按住 | `keys` 或 `key`、`modifiers`、`duration_ms` |
+| `press_key` / `hold_key` | 标准 keysym 风格组合键与定时按住；Windows/Meta/Command 键会被拒绝 | `window`、`key`、`duration_ms` |
 | `scroll` | 标准滚动增量，或旧式滚轮刻度 | `x`、`y`、`scroll_x`、`scroll_y`，或 `amount`、`direction` |
-| `move` / `mouse_move` / `mouse_down` / `mouse_up` | 标准移动与原始鼠标原语 | `x`、`y`、`button`、`keys`；前台保留修饰键，无法安全后台投递时返回 `background_unavailable` |
+| `mouse_down` / `mouse_up` | 原始鼠标原语 | `x`、`y`、`button`；无法安全后台投递时返回 `background_unavailable` |
 | `drag` | 标准有序路径，或旧式端点；前台真实 SendInput 逐段拖动，后台 UIA 移动返回端点模式 | `path`，或 `from_x`、`from_y`、`to_x`、`to_y` |
 | `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |
 | `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
-| `open_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点） / 动作间等待 | `name` / `duration_s` |
+| `launch_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点） / 动作间等待 | `app` / `duration_s` |
 | `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
 | `browser_state` | 列出标签页（默认仅 tab_id，`include_url: true` 才带 url/title），或返回 AI 独立浏览器标签页的有界语义快照（含 `page_status`） | `browser_endpoint`、`tab_id`?、`include_url`? |
 | `browser_click` / `browser_type` / `browser_key` | 操作最新 `browser_state` 返回的 token；目标过期或身份变化时拒绝 | `browser_endpoint`、`tab_id`、`browser_element` |
 
-> `app` 可以是 pid 数字、进程名或窗口标题子串；同名标题的多窗口必须用 `window_index` 或 `hwnd` 指定；标题不同的多窗口会自动选定最优窗口并在结果中返回 `chosen_hwnd`。桌面元素动作必须携带同一次 `get_app_state` 返回的 `snapshot_id`。
+> `list_apps` 返回的 `app.id`、`displayName`、`isRunning` 与 `Window { id, app }` 可直接复用；`app` 也可用 pid 数字、进程名或窗口标题子串。桌面元素动作必须携带同一次 `get_window_state { include_text: true }` 返回的 `snapshot_id`。
 
 批量调用示例：`computer { "actions": [{ "action": "click", "x": 420, "y": 260 }, { "action": "wait", "duration_s": 1 }] }`。每个步骤都返回在 `steps` 中；整批动作完成后只生成一次最终 `post_action_observation.screenshot`，避免用中间帧继续决策。
 
@@ -204,7 +204,7 @@ lib/index.js                    宿主端：工具注册（defineTool + ctx.tool
 lib/pc-pilot-helper.ps1     单文件 helper：UIA / 截图 / 输入 / 光标与状态条通知
 lib/virtual-cursor-overlay.ps1  常驻 overlay：内嵌 C# 分层窗口渲染
 lib/pcpilot-statusbar.ps1       常驻状态条：毛玻璃胶囊 + 绿色呼吸灯点
-scripts/smoke-test.ps1          冒烟测试：对真实窗口执行 list_apps / get_app_state / 后台点击
+scripts/smoke-test.ps1          冒烟测试：对真实窗口执行 list_apps / get_window_state / 后台点击
 docs/plugin-entry.yml           awesome-dsh-plugin 目录收录条目
 ```
 

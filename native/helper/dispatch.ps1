@@ -293,7 +293,9 @@ function Invoke-ActionRequest {
       $idx = [int](Get-PayloadValue 'window_index')
       $shot = Get-PayloadValue 'screenshot'
       if ($null -eq $shot) { $shot = $true }
-      $st = Do-AppState -App $app -WindowIndex $idx -WithScreenshot ([bool]$shot) -Dispatch (Get-Dispatch)
+      $withText = Get-PayloadValue 'include_text'
+      if ($null -eq $withText) { $withText = $false }
+      $st = Do-AppState -App $app -WindowIndex $idx -WithScreenshot ([bool]$shot) -WithText ([bool]$withText) -Dispatch (Get-Dispatch)
       $result.window = $st.window
       $result.snapshot_id = $st.snapshot_id
       $result.screenshot_id = $st.screenshot_id
@@ -303,6 +305,17 @@ function Invoke-ActionRequest {
       $result.element_count = $st.element_count
       $result.document_text = $st.document_text
       $result.note = $st.note
+      $result.accessibility = if ([bool]$withText) {
+        # Match the native Computer Use presentation: a compact, copyable tree
+        # for model reasoning while retaining the richer `elements` array for
+        # DSH callers that need structured fields.
+        $treeLines = @($st.elements | ForEach-Object {
+          $line = "[$($_.index)] $($_.role): $($_.name)"
+          if ($_.value) { $line += " = $($_.value)" }
+          $line
+        })
+        @{ tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text }
+      } else { $null }
       $result.dispatch = (Get-Dispatch)
       $result.message = "State captured for '$app' ($($st.element_count) elements)"
       if ($st.screenshot -and $st.screenshot.error) { $result.message += ' [' + $st.screenshot.error + ']' }

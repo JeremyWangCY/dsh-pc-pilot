@@ -46,7 +46,7 @@ Once listed, search for *dsh-pc-pilot* in the market and click install.
 ### From a GitHub release
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.2.0/dsh-pc-pilot-0.2.0.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.0/dsh-pc-pilot-0.3.0.tgz
 ```
 
 Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.
@@ -100,9 +100,10 @@ The plugin registers one global tool, `computer`. Typical flow:
 | --- | --- | --- |
 | `dispatch` | `background` | UIA patterns + window messages; never steals focus. `foreground` uses real SendInput — pick it per task only when the user asked for real control or the essential action has no background path. |
 | `overlay` | `true` | Show the click-through cursor at each action point; it auto-hides 3 s after the last action. |
-| `screenshot` | `true` | Capture a per-window PNG in `get_app_state`. |
+| `include_screenshot` | `true` | Capture a per-window PNG in `get_window_state`. |
+| `include_text` | `false` | Include the indexed accessibility tree and document text when an element action is needed. |
 | `app` | — | pid number, process name, or window-title substring; same-titled duplicate windows are rejected unless `window_index` or `hwnd` identifies one, while differently titled windows of one app auto-resolve and return `chosen_hwnd`. |
-| `snapshot_id` | — | Required for desktop element actions; use the id from the latest `get_app_state`. |
+| `snapshot_id` | — | Required for desktop element actions; use the id from the latest `get_window_state { include_text: true }`. |
 | `browser_endpoint` / `tab_id` / `browser_element` | — | Explicit loopback DevTools endpoint, exact tab id, and token from the latest `browser_state`. |
 | `x` / `y` | — | Window-local pixels with `app`/`hwnd`, matching ChatGPT Computer Use; screen coordinates without a target. Set `coordinate_space: "screen"` only for an explicit absolute click. |
 | `button` / `click_count` / `keys` | `left` / `1` / — | Mouse button and legacy click repetitions; `keys` supplies standard keypress chords and mouse modifiers. Foreground mouse actions and validated native-window background clicks preserve the modifier state; unsupported background paths report `background_unavailable`. |
@@ -147,7 +148,7 @@ pwsh -File scripts/smoke-test.ps1
 dotnet publish native/wgc-capture/wgc-capture.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o lib/wgc
 ```
 
-The smoke test exercises helper actions (`list_apps`, `get_app_state`, background clicks) against a real window. To run the plugin from a local checkout, link it into a DSH profile as shown above.
+The smoke test exercises helper actions (`list_apps`, `get_window_state`, background clicks) against a real window. To run the plugin from a local checkout, link it into a DSH profile as shown above.
 
 ## License
 

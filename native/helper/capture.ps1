@@ -69,7 +69,7 @@ function Invoke-WgcCapture {
 }
 
 function Do-AppState {
-  param([string]$App, [int]$WindowIndex, [bool]$WithScreenshot, [string]$Dispatch)
+  param([string]$App, [int]$WindowIndex, [bool]$WithScreenshot, [bool]$WithText, [string]$Dispatch)
   $script:observation = $null
   $win = Resolve-TargetWindow -App $App -Index $WindowIndex
   if ($Dispatch -eq 'foreground') {
@@ -167,16 +167,31 @@ function Do-AppState {
     }
     }
   }
-  $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-  # DESK-03: a freshly launched Win11 Notepad populates its UIA tree late and can
-  # expose only the root pane (2 elements) for a while. One short retry turns
-  # that into the full tree without a second model round-trip.
-  if ($tree.Count -le 2) {
-    Start-Sleep -Milliseconds 250
-    $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-    if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+  # A screenshot-only observation is the native Computer Use default.  Avoid
+  # walking a potentially huge UIA tree unless the caller specifically needs
+  # element indexes or document text; this keeps canvas/Chromium observations
+  # responsive while preserving screenshot-id coordinate binding below.
+  $tree = @()
+  $docText = ''
+  $focusedElement = ''
+  $selectedText = ''
+  $script:cachedTreeHwnd = [IntPtr]::Zero
+  $script:cachedElements = $null
+  $script:cachedIdentities = $null
+  if ($WithText) {
+    $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+    # DESK-03: a freshly launched Win11 Notepad populates its UIA tree late and can
+    # expose only the root pane (2 elements) for a while. One short retry turns
+    # that into the full tree without a second model round-trip.
+    if ($tree.Count -le 2) {
+      Start-Sleep -Milliseconds 250
+      $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+      if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+    }
+    $docText = Get-DocumentText $win.Hwnd
+    $focusedElement = Get-FocusedElementText $win.Hwnd
+    $selectedText = Get-SelectedText $win.Hwnd
   }
-  $docText = Get-DocumentText $win.Hwnd
   $script:observation = @{ id = [guid]::NewGuid().ToString('N'); hwnd = $win.Hwnd; rect = $win.Rect; created = [DateTime]::UtcNow }
   $script:lastScreenshot = $null
   if ($shot) {
@@ -195,7 +210,9 @@ function Do-AppState {
     elements = $tree
     element_count = $tree.Count
     document_text = if ($docText) { $docText } else { '' }
-    note = 'Element indexes are only valid together with this state; refresh after any UI change.'
+    focused_element = if ($focusedElement) { $focusedElement } else { '' }
+    selected_text = if ($selectedText) { $selectedText } else { '' }
+    note = if ($WithText) { 'Element indexes are only valid together with this state; refresh after any UI change.' } else { 'Screenshot-only state: request include_text:true before using element_index.' }
   }
 }
 
