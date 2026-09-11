@@ -20,7 +20,11 @@ const bareTool = defineComputerTool()
 assert.ok(bareTool.parameters.properties, 'defineComputerTool().parameters must have properties object')
 assert.ok(bareTool.parameters.properties.name, 'name property must be present in defineComputerTool().parameters.properties')
 assert.equal(bareTool.parameters.properties.name.type, 'string')
-assert.equal(bareTool.parameters.properties.name.description, 'Application name or executable path (for launch_app).')
+assert.match(
+  bareTool.parameters.properties.name.description,
+  /Application name, executable path, or registered Windows activation protocol/,
+  'launch_app name schema must document Windows activation protocol support'
+)
 
 // 2. Static source contract checks
 const indexSrc = fs.readFileSync(indexPath, 'utf8')

@@ -88,7 +88,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `drag` | Standard `path` or legacy endpoints; element move (background) or real SendInput drag (foreground) |
 | `screenshot` / `zoom` | Full-display or region capture; crop the latest shot |
 | `switch_display` / `cursor_position` | Default capture display; real cursor location |
-| `launch_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); pause between actions |
+| `launch_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); registered Windows activation protocols such as `ms-settings:display` are supported. Delegated app launches return a target only when exactly one new window is safely identifiable; pause between actions |
 | `activate_window` / `close_window` / `get_window` | Bring window to foreground / graceful WM_CLOSE / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
 | `browser_state` | List tabs (ids only unless `include_url: true`) or return a bounded semantic snapshot of an AI-owned browser tab (with `page_status`) |

@@ -932,6 +932,11 @@ function Invoke-ActionRequest {
     'launch_app' {
       $name = Get-PayloadValue 'name'
       if (-not $name) { throw 'launch_app requires name' }
+      # Capture the desktop before launch.  Store only HWNDs: this lets us safely
+      # recognize a single, newly-created top-level window when an activation
+      # protocol delegates from a short-lived launcher process to a UWP/packaged
+      # app.  We never select an already-open user window by this fallback.
+      $preLaunchHwnds = @([DshWin32]::EnumWindowsList() | ForEach-Object { $_.Hwnd.ToInt64() })
       # support arguments after the executable (quoted or unquoted):
       # 'notepad.exe C:\foo.txt', '"C:\Program Files\App\app.exe" --flag value'
       $cmd = Split-AppCommand -Name ([string]$name)
@@ -948,6 +953,10 @@ function Invoke-ActionRequest {
       # Edge profile, window placement, or cookies!
       $baseExe = [System.IO.Path]::GetFileNameWithoutExtension($filePath).ToLowerInvariant()
       $isChromiumBrowser = ($baseExe -in @('msedge', 'chrome', 'brave', 'chromium', 'vivaldi'))
+      # Command hosts frequently create a short-lived console HWND before
+      # handing work to the actual application.  Treat them as launchers so a
+      # transient console can never be returned as the user's target.
+      $isLikelyLauncher = ($baseExe -in @('cmd', 'powershell', 'pwsh', 'wscript', 'cscript'))
       $headless = [bool](Get-PayloadValue 'headless')
       if ($headless -and -not $isChromiumBrowser) { throw 'headless is supported only for Chromium browsers' }
       if ($isChromiumBrowser) {
@@ -1003,13 +1012,23 @@ function Invoke-ActionRequest {
 
       # Launch silently in background using -WindowStyle Minimized (direct at bottom, zero flicker/focus steal)
       $style = if (Get-PayloadValue 'activate' -or (Get-Dispatch) -eq 'foreground') { 'Normal' } else { 'Minimized' }
-      $proc = if ($argList.Count -gt 0) {
+      # Start-Process supports registered Windows activation protocols such as
+      # ms-settings:display.  They are not executable files, but treating them
+      # as ordinary paths made Settings impossible to open through this action.
+      $isActivationProtocol = $filePath -match '^[A-Za-z][A-Za-z0-9+.-]*:'
+      $proc = if ($isActivationProtocol) {
+        # Passing WindowStyle directly to a URI activation is rejected by some
+        # Windows builds. Explorer is the documented shell router for these
+        # registered protocols and still gives us a bounded launcher process.
+        Start-Process -FilePath explorer.exe -ArgumentList $filePath -WindowStyle $style -PassThru
+      } elseif ($argList.Count -gt 0) {
         Start-Process -FilePath $filePath -ArgumentList $argList -WindowStyle $style -PassThru
       } else {
         Start-Process -FilePath $filePath -WindowStyle $style -PassThru
       }
       $result.message = "Started $filePath ($($argList.Count) argument(s)) (launched $style in background)"
       $result.pid = $proc.Id
+      if ($isActivationProtocol) { $result.activation_protocol = $filePath }
       if ($debugProfileDir) {
         $activePort = Join-Path $debugProfileDir 'DevToolsActivePort'
         $browserReady = $false
@@ -1056,6 +1075,10 @@ function Invoke-ActionRequest {
         Start-Sleep -Milliseconds 50
         $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
       }
+      # A protocol is also routed through Explorer, which may be the user's
+      # long-running shell process.  Never return one of its existing windows
+      # as though it were the newly activated target.
+      if ($isLikelyLauncher -or $isActivationProtocol) { $wins = @() }
       # Chromium may hand the URL to an already-running browser process for the
       # same isolated profile. In that case Start-Process returns a short-lived
       # broker PID with no window, so resolve the real profile-owned window before
@@ -1109,6 +1132,33 @@ function Invoke-ActionRequest {
             }
           }
         } catch { }
+      } elseif (-not $isChromiumBrowser) {
+        # Some real Windows apps (notably packaged/UWP apps) receive activation
+        # through a broker.  The PID returned by Start-Process then owns no
+        # window even though a new app window appears.  Adopt it only when the
+        # desktop delta has exactly one viable candidate; otherwise leave the
+        # identity unresolved rather than risking a user's pre-existing window.
+        $delegated = @()
+        for ($attempt = 0; $attempt -lt 60 -and $delegated.Count -eq 0; $attempt++) {
+          Start-Sleep -Milliseconds 50
+          $delegated = @([DshWin32]::EnumWindowsList() | Where-Object {
+            ($preLaunchHwnds -notcontains $_.Hwnd.ToInt64()) -and $_.Title -and
+            -not $_.Minimized -and ($_.Rect.Right - $_.Rect.Left) -ge 50 -and
+            ($_.Rect.Bottom - $_.Rect.Top) -ge 32
+          })
+        }
+        if ($delegated.Count -eq 1) {
+          $result.hwnd = $delegated[0].Hwnd.ToInt64()
+          $result.pid = $delegated[0].Pid
+          $result.delegated_launch = $true
+          $result.message += '; resolved one newly-created delegated app window'
+        } elseif ($delegated.Count -gt 1) {
+          $result.window_unavailable = $true
+          $result.message += '; launch created multiple windows, so no window was selected (use list_windows)'
+        } else {
+          $result.window_unavailable = $true
+          $result.message += '; launcher returned no top-level window (use list_windows to select an existing or late window)'
+        }
       }
     }
 
