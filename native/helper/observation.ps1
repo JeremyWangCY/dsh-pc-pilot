@@ -258,6 +258,11 @@ function Get-AccessibilityTree {
     $invoke = $false
     $ip = $null
     if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) { $invoke = $true }
+    $selected = $false
+    $selectionItem = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionItem)) {
+      try { $selected = [bool]$selectionItem.Current.IsSelected } catch { }
+    }
     $relX = if ($null -ne $WinRect) { Safe-Int ($rect.X - $WinRect.Left) } else { Safe-Int $rect.X }
     $relY = if ($null -ne $WinRect) { Safe-Int ($rect.Y - $WinRect.Top) } else { Safe-Int $rect.Y }
     $item = [ordered]@{
@@ -269,6 +274,7 @@ function Get-AccessibilityTree {
       enabled = $cur.IsEnabled
       offscreen = $cur.IsOffscreen
       invokable = $invoke
+      selected = $selected
       native_window_handle = [int64]$cur.NativeWindowHandle
       rect = @{ x = $relX; y = $relY; width = (Safe-Int $rect.Width); height = (Safe-Int $rect.Height) }
       screen_rect = @{ x = (Safe-Int $rect.X); y = (Safe-Int $rect.Y); width = (Safe-Int $rect.Width); height = (Safe-Int $rect.Height) }

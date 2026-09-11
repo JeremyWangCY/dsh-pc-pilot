@@ -314,7 +314,7 @@ function Invoke-ActionRequest {
           if ($_.value) { $line += " = $($_.value)" }
           $line
         })
-        @{ tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text }
+        @{ tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text; selected_elements = $st.selected_elements }
       } else { $null }
       $result.dispatch = (Get-Dispatch)
       $result.message = "State captured for '$app' ($($st.element_count) elements)"

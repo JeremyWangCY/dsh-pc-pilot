@@ -54,6 +54,7 @@ try {
   assert.equal(typeof stateRes.accessibility?.tree, 'string', 'include_text:true must expose the native-style formatted accessibility tree')
   assert.equal(typeof stateRes.accessibility?.focused_element, 'string', 'include_text:true must expose focused-element context when the provider can identify it')
   assert.equal(typeof stateRes.accessibility?.selected_text, 'string', 'include_text:true must expose selected-text context when the provider supports it')
+  assert.ok(Array.isArray(stateRes.accessibility?.selected_elements), 'include_text:true must expose selected accessibility elements')
 
   const elIndex = stateRes.elements[0].index
   const t0 = performance.now()

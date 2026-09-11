@@ -175,6 +175,7 @@ function Do-AppState {
   $docText = ''
   $focusedElement = ''
   $selectedText = ''
+  $selectedElements = @()
   $script:cachedTreeHwnd = [IntPtr]::Zero
   $script:cachedElements = $null
   $script:cachedIdentities = $null
@@ -191,6 +192,7 @@ function Do-AppState {
     $docText = Get-DocumentText $win.Hwnd
     $focusedElement = Get-FocusedElementText $win.Hwnd
     $selectedText = Get-SelectedText $win.Hwnd
+    $selectedElements = @($tree | Where-Object { $_.selected } | ForEach-Object { "[$($_.index)] $($_.role): $($_.name)" })
   }
   $script:observation = @{ id = [guid]::NewGuid().ToString('N'); hwnd = $win.Hwnd; rect = $win.Rect; created = [DateTime]::UtcNow }
   $script:lastScreenshot = $null
@@ -212,6 +214,7 @@ function Do-AppState {
     document_text = if ($docText) { $docText } else { '' }
     focused_element = if ($focusedElement) { $focusedElement } else { '' }
     selected_text = if ($selectedText) { $selectedText } else { '' }
+    selected_elements = $selectedElements
     note = if ($WithText) { 'Element indexes are only valid together with this state; refresh after any UI change.' } else { 'Screenshot-only state: request include_text:true before using element_index.' }
   }
 }
