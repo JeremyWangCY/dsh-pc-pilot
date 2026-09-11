@@ -2,19 +2,18 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { defineComputerTool, stopDaemon } from '../lib/index.js'
 
-// 1. Schema assertions: all 25 actions (16 legacy + 9 parity additions)
+// 1. Schema assertions: canonical Windows Computer Use plus PC-Pilot extensions.
 const tool = defineComputerTool((def) => def)
 assert.equal(tool.name, 'computer')
 const params = tool.parameters.properties
 
 const expectedActions = [
-  // 16 legacy actions
-  'list_apps', 'get_app_state', 'click_element', 'click', 'type', 'key',
-  'scroll', 'drag', 'set_value', 'open_app',
+  // Windows Computer Use desktop actions
+  'list_apps', 'list_windows', 'get_window', 'launch_app', 'get_window_state',
+  'click', 'press_key', 'type_text', 'scroll', 'drag', 'set_value', 'perform_secondary_action', 'activate_window',
+  // PC-Pilot extensions
   'read_clipboard', 'write_clipboard', 'mouse_down', 'mouse_up', 'hold_key', 'list_displays',
-  // 9 parity actions (ZCode computer-use capability surface)
-  'mouse_move', 'perform_action', 'select_text', 'screenshot', 'zoom',
-  'switch_display', 'cursor_position', 'list_windows', 'wait',
+  'select_text', 'screenshot', 'zoom', 'switch_display', 'cursor_position', 'wait', 'close_window',
 ]
 
 assert.ok(
@@ -38,12 +37,12 @@ const expectedParams = [
   ['width', 'number'],
   ['height', 'number'],
   ['duration_s', 'number'],
-  ['path', 'string'],
 ]
 for (const [name, type] of expectedParams) {
   assert.ok(params[name], `${name} parameter must be present`)
   assert.equal(params[name].type, type, `${name} must be typed '${type}'`)
 }
+assert.ok(params.path.oneOf, 'path must accept both the canonical drag path and zoom screenshot path')
 
 // direction now covers horizontal scrolling
 assert.deepEqual(params.direction.enum, ['down', 'up', 'left', 'right'])
@@ -105,32 +104,28 @@ assert.ok(
   `zoom failure must name the missing crop size: ${JSON.stringify(zoomNoSizeRes.message)}`
 )
 
-// mouse_move in background with overlay off: synthetic only, never moves the real mouse
-const moveRes = await tool.execute({ action: 'mouse_move', x: 10, y: 10, overlay: false })
-assert.ok(moveRes, 'mouse_move must return a result object')
-assert.equal(moveRes.ok, true, `mouse_move should succeed: ${JSON.stringify(moveRes)}`)
-assert.equal(moveRes.action, 'mouse_move')
-assert.ok(moveRes.position, 'mouse_move must return position')
-
-// get_app_state smoke on a real window: the screenshot tier chain must produce a
-// usable PNG (tier1 print_window implicit / tier2 bitblt_screen fallback).
-// Tool/tray windows can expose empty UIA trees, so try candidates largest-first.
+// get_window_state smoke on a real window: the occlusion-immune capture chain (WGC
+// bridge, then the PrintWindow ladder) must produce a usable PNG.
+// Tool/tray windows can expose empty UIA trees, and DirectComposition/UWP
+// surfaces legitimately report screenshot_black — so pick a candidate that
+// yields both a non-empty element tree and a captured frame.
 const stateCandidates = [...listWinRes.windows]
   .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height))
   .slice(0, 4)
 let stateRes = null
 for (const cand of stateCandidates) {
-  const res = await tool.execute({ action: 'get_app_state', app: String(cand.pid), screenshot: true })
-  if (res.ok && Array.isArray(res.elements) && res.elements.length > 0) { stateRes = res; break }
+  const res = await tool.execute({ action: 'get_window_state', app: String(cand.pid), hwnd: cand.hwnd, screenshot: true })
+  if (res.ok && Array.isArray(res.elements) && res.elements.length > 0 &&
+      res.screenshot && typeof res.screenshot.path === 'string' && res.screenshot.path.length > 0) { stateRes = res; break }
 }
-assert.ok(stateRes, `get_app_state must yield a non-empty element tree for one of ${stateCandidates.length} candidate windows`)
-assert.ok(stateRes.screenshot, 'get_app_state must return a screenshot object')
+assert.ok(stateRes, `get_window_state must yield a non-empty element tree with a captured screenshot for one of ${stateCandidates.length} candidate windows`)
+assert.ok(stateRes.screenshot, 'get_window_state must return a screenshot object')
 assert.ok(typeof stateRes.screenshot.path === 'string' && stateRes.screenshot.path.length > 0,
   `screenshot must have a path: ${JSON.stringify(stateRes.screenshot)}`)
 assert.ok(fs.existsSync(stateRes.screenshot.path), `screenshot file must exist: ${stateRes.screenshot.path}`)
 assert.ok(
-  !stateRes.screenshot.method || stateRes.screenshot.method === 'bitblt_screen',
-  `screenshot method must be tier1-implicit or bitblt_screen, got ${stateRes.screenshot.method}`
+  !stateRes.screenshot.method || ['windows_graphics_capture', 'print_window'].includes(stateRes.screenshot.method),
+  `screenshot method must be windows_graphics_capture or print_window, got ${stateRes.screenshot.method}`
 )
 
 // Clean up daemon before exit

@@ -7,16 +7,16 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
 
-const helperPath = path.join(rootDir, 'lib', 'computer-use-helper.ps1')
+const helperPath = path.join(rootDir, 'lib', 'pc-pilot-helper.ps1')
 const overlayPath = path.join(rootDir, 'lib', 'virtual-cursor-overlay.ps1')
 
-assert.ok(fs.existsSync(helperPath), 'computer-use-helper.ps1 exists')
+assert.ok(fs.existsSync(helperPath), 'pc-pilot-helper.ps1 exists')
 assert.ok(fs.existsSync(overlayPath), 'virtual-cursor-overlay.ps1 exists')
 
 const helperContent = fs.readFileSync(helperPath, 'utf8')
 const overlayContent = fs.readFileSync(overlayPath, 'utf8')
 
-// 1. DPI Awareness in computer-use-helper.ps1
+// 1. DPI Awareness in pc-pilot-helper.ps1
 assert.ok(
   helperContent.includes('SetProcessDpiAwarenessContext((IntPtr)(-4))'),
   'helper should call SetProcessDpiAwarenessContext((IntPtr)(-4))'
@@ -30,7 +30,7 @@ assert.ok(
   'helper should invoke InitDpiAwareness at startup'
 )
 
-// 2. Win32 SendMessage Hang Protection & Unicode in computer-use-helper.ps1
+// 2. Win32 SendMessage Hang Protection & Unicode in pc-pilot-helper.ps1
 assert.match(
   helperContent,
   /\[DllImport\("user32\.dll",\s*CharSet\s*=\s*CharSet\.Unicode\)\].*?SendMessage\(/s,
@@ -57,7 +57,7 @@ assert.match(
   'Send-BackgroundKey must use SendMessageTimeout with 3000ms timeout'
 )
 
-// 3. Target Window Search Escaping in computer-use-helper.ps1
+// 3. Target Window Search Escaping in pc-pilot-helper.ps1
 assert.ok(
   helperContent.includes('.IndexOf($App, [System.StringComparison]::OrdinalIgnoreCase) -ge 0'),
   'Resolve-TargetWindow must use IndexOf with OrdinalIgnoreCase instead of -like wildcard'
@@ -67,14 +67,14 @@ assert.ok(
   'wildcard search with -like "*$App*" must be removed'
 )
 
-// 4. Double-Scroll Defect guard in computer-use-helper.ps1
+// 4. Double-Scroll Defect guard in pc-pilot-helper.ps1
 assert.match(
   helperContent,
   /if\s*\(\$doc\s*-and\s*\$doc\.TryGetCurrentPattern\(.*?\$done\s*=\s*\$true.*?if\s*\(-not\s*\$done\)\s*\{\s*\$el\s*=\s*\[System\.Windows\.Automation\.AutomationElement\]::FromPoint\(\$pt\)/s,
   'element-under-cursor scroll fallback must be wrapped in if (-not $done)'
 )
 
-// 5. Dark Mode / Black Screenshot Detection in computer-use-helper.ps1
+// 5. Dark Mode / Black Screenshot Detection in pc-pilot-helper.ps1
 assert.ok(
   helperContent.includes('$w * 0.25') && helperContent.includes('$w * 0.75'),
   'Do-AppState must sample quadrant points (25% and 75%)'
@@ -85,7 +85,16 @@ assert.match(
   'Do-AppState must verify border / title points before flagging black'
 )
 
-// 5b. Do-AppState screenshot fallback chain: PrintWindow -> screen-DC BitBlt
+// 5b. Do-AppState screenshot chain: WGC bridge -> PrintWindow multi-mode, no screen-DC tier
+assert.match(
+  helperContent,
+  /function\s+Invoke-WgcCapture[\s\S]*?windows_graphics_capture/,
+  'Do-AppState must prefer the optional Windows Graphics Capture HWND bridge'
+)
+assert.ok(
+  fs.existsSync(path.join(rootDir, 'lib', 'wgc', 'dsh-pc-pilot-wgc.exe')),
+  'the packaged WGC bridge executable must be present'
+)
 assert.match(
   helperContent,
   /function\s+Test-BitmapBlank/,
@@ -93,24 +102,22 @@ assert.match(
 )
 assert.match(
   helperContent,
-  /Test-BitmapBlank[\s\S]*?CopyFromScreen\(\$win\.Rect\.Left,\s*\$win\.Rect\.Top,\s*0,\s*0,/,
-  'Do-AppState must fall back to Graphics.CopyFromScreen over the window rect when PrintWindow blanks/fails'
+  /foreach \(\$flag in @\(2, 0, 3\)\)/,
+  'Do-AppState must try the PrintWindow flag ladder 2 -> 0 -> 3'
+)
+assert.match(
+  helperContent,
+  /screenshot_black: WGC and PrintWindow both produced no frame/,
+  'when both occlusion-immune tiers fail Do-AppState must report screenshot_black instead of capturing the occluder'
+)
+assert.doesNotMatch(
+  helperContent,
+  /CopyFromScreen\(\$win\.Rect/,
+  'Do-AppState must never fall back to a screen-DC copy of the window rect (it captures the occluder)'
 )
 assert.ok(
-  helperContent.includes("'bitblt_screen'"),
-  'Do-AppState must tag the screen-DC fallback screenshot with method bitblt_screen'
-)
-// tier 2 must stay guarded (never BitBlt a minimized window — that captures whatever
-// is on screen there) and must re-check the fallback frame before declaring success
-assert.match(
-  helperContent,
-  /\} elseif \(-not \$minimized\) \{[\s\S]*?CopyFromScreen/,
-  'tier-2 BitBlt fallback must be guarded by -not $minimized'
-)
-assert.match(
-  helperContent,
-  /\$black2 = Test-BitmapBlank/,
-  'tier-2 fallback frame must be re-checked for blank before tagging success'
+  !helperContent.includes("'bitblt_screen'"),
+  'Do-AppState must not tag any screenshot as bitblt_screen'
 )
 
 // 5c. Occlusion-immune background clicks: app-scoped clicks aim at the target window's
@@ -137,8 +144,8 @@ assert.match(
 // reverting either one back to the screen-level occluder lookup fails the check
 assert.match(
   helperContent,
-  /'click' \{[\s\S]{0,4000}\$h = Find-TargetHwndAt -Hwnd \$win\.Hwnd/,
-  'the click branch must resolve app-scoped clicks via Find-TargetHwndAt'
+  /'click' \{[\s\S]{0,7000}Assert-ClickTarget[\s\S]{0,7000}target_validation_failed/,
+  'the click branch must validate the target and refuse unverified fallback clicks'
 )
 assert.match(
   helperContent,
@@ -154,16 +161,12 @@ assert.ok(
   'the shared single-scan hit-test Find-TargetHitsAt must exist (no duplicate full-tree scans)'
 )
 
-// 5d. click_element background fallback: when no UIA action pattern is supported,
-// fall back to target-window WM message at element center if BoundingRectangle is valid
+// 5d. Element-index click remains target-window scoped and validated before it
+// sends an occlusion-immune background action.
 assert.match(
   helperContent,
-  /'click_element'[\s\S]*?\$h = Find-TargetHwndAt -Hwnd \$win\.Hwnd -X \$cx -Y \$cy -Win \$win[\s\S]*?Send-BackgroundMouseButton -Hwnd \$h -Sx \$cx -Sy \$cy -Button 'left' -Count 1/,
-  'click_element background path must fall back to target-window WM click when element has valid rect'
-)
-assert.ok(
-  helperContent.includes('"Clicked element $element via target-window WM message to hwnd $($h.ToInt64()) at ($cx, $cy) (no UIA pattern; occlusion-immune)"'),
-  'click_element must set descriptive message on target-window WM fallback'
+  /'click'[\s\S]*?Find-ElementByIndex -Hwnd \$win\.Hwnd -Index \(\[int\]\$rawElement\)[\s\S]*?Assert-ClickTarget -Element \$el/,
+  'click with element_index must validate the cached element before dispatch'
 )
 
 // 5e. UIA element caching (O(1) lookup): Get-AccessibilityTree caches elements into $script:cachedElements,
@@ -223,10 +226,17 @@ assert.match(
   /function\s+Find-ValuePatternEl.*?\[System\.Windows\.Automation\.AutomationElement\]::FocusedElement/s,
   'Find-ValuePatternEl must check FocusedElement first'
 )
+const typeAction = helperContent.match(/'type_text'\s*\{([\s\S]*?)\n\s*'press_key'\s*\{/)
+assert.ok(typeAction, 'helper must contain a type_text action')
+assert.doesNotMatch(
+  typeAction[1],
+  /\.SetValue\(\$text\)/,
+  'type_text must not silently degrade into ValuePattern replacement; set_value owns replacement semantics'
+)
 assert.match(
   helperContent,
   /catch\s*\{\s*@\{\s*ok\s*=\s*\$false;\s*action\s*=\s*\$Action;\s*message\s*=\s*"Invalid JSON payload:/s,
-  'computer-use-helper.ps1 must catch JSON parse errors and return compressed JSON with ok: false'
+  'pc-pilot-helper.ps1 must catch JSON parse errors and return compressed JSON with ok: false'
 )
 
 const b64Match = overlayContent.match(/\$b64\s*=\s*"([^"]+)"/)

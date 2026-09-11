@@ -7,7 +7,7 @@ import { defineComputerTool, stopDaemon } from '../lib/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
-const helperPath = path.join(rootDir, 'lib', 'computer-use-helper.ps1')
+const helperPath = path.join(rootDir, 'lib', 'pc-pilot-helper.ps1')
 const helperSrc = fs.readFileSync(helperPath, 'utf8')
 
 // ============================================================================
@@ -82,56 +82,61 @@ assert.ok(
 )
 
 // ============================================================================
-// 3. Dynamic Live Parity Tests on Scratch Notepad (Strict Isolation)
+// 3. Dynamic Live Parity Tests on Owned Native Fixture (Strict Isolation)
 // ============================================================================
 // Strictly follows read-only contract for the user session:
-// - Spawns our own scratch notepad
+// - Spawns our own owned fixture
 // - Tests get_window, chords, activate_window, close_window
 // - Immediately cleans up via taskkill
-let notepadPid = 0
-let notepadHwnd = 0
+let fixturePid = 0
+let fixtureHwnd = 0
 
 try {
   // Test silent open_app
-  const openRes = await tool.execute({ action: 'open_app', name: 'notepad' })
+  const fixturePath = path.join(rootDir, 'test/fixtures/native-window.ps1')
+  const openRes = await tool.execute({ action: 'launch_app', name: `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${fixturePath}"` })
   assert.equal(openRes.ok, true, `open_app notepad should succeed: ${JSON.stringify(openRes)}`)
-  notepadPid = openRes.pid
-  assert.ok(Number.isInteger(notepadPid) && notepadPid > 0, 'open_app must return a valid pid')
+  fixturePid = openRes.pid
+  assert.ok(Number.isInteger(fixturePid) && fixturePid > 0, 'open_app must return a valid pid')
 
   // Wait briefly for the window to be registered in window list
   let foundWin = null
   for (let i = 0; i < 20; i++) {
-    const listRes = await tool.execute({ action: 'list_windows', app: String(notepadPid) })
+    const listRes = await tool.execute({ action: 'list_windows', app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}) })
     if (listRes.ok && Array.isArray(listRes.windows) && listRes.windows.length > 0) {
-      foundWin = listRes.windows[0]
-      break
+      foundWin = listRes.windows.find(w => w.title === 'PC-Pilot native test fixture')
+      if (foundWin) break
     }
     await new Promise((r) => setTimeout(r, 50))
   }
-  assert.ok(foundWin, 'scratch notepad window must appear in list_windows')
-  notepadHwnd = foundWin.hwnd
-  assert.ok(notepadHwnd > 0, 'scratch notepad must have a valid hwnd')
+  assert.ok(foundWin, 'owned fixture window must appear in list_windows')
+  fixtureHwnd = foundWin.hwnd
+  assert.ok(fixtureHwnd > 0, 'owned fixture must have a valid hwnd')
+  // Background observation must never implicitly restore a minimized window.
+  // Set up only this owned fixture explicitly before testing background input.
+  const prepared = await tool.execute({ action: 'get_window_state', hwnd: fixtureHwnd, screenshot: false, dispatch: 'foreground' })
+  assert.equal(prepared.ok, true, JSON.stringify(prepared))
 
   // 3a. get_window by app
-  const gwAppRes = await tool.execute({ action: 'get_window', app: String(notepadPid) })
+  const gwAppRes = await tool.execute({ action: 'get_window', app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}) })
   assert.equal(gwAppRes.ok, true, `get_window by app must succeed: ${JSON.stringify(gwAppRes)}`)
-  assert.equal(gwAppRes.hwnd, notepadHwnd, 'get_window hwnd must match')
-  assert.equal(gwAppRes.pid, notepadPid, 'get_window pid must match')
-  assert.equal(gwAppRes.process_name.toLowerCase(), 'notepad', 'get_window process_name must be notepad')
+  assert.equal(gwAppRes.hwnd, fixtureHwnd, 'get_window hwnd must match')
+  assert.equal(gwAppRes.pid, fixturePid, 'get_window pid must match')
+  assert.equal(gwAppRes.process_name.toLowerCase(), 'powershell', 'get_window must match the fixture process')
   assert.ok(gwAppRes.rect.width > 0 && gwAppRes.rect.height > 0, 'get_window rect must have positive dimensions')
   assert.equal(typeof gwAppRes.minimized, 'boolean', 'get_window minimized must be boolean')
   assert.ok(gwAppRes.window, 'get_window must include window info object')
 
   // 3b. get_window by hwnd
-  const gwHwndRes = await tool.execute({ action: 'get_window', hwnd: notepadHwnd })
+  const gwHwndRes = await tool.execute({ action: 'get_window', hwnd: fixtureHwnd })
   assert.equal(gwHwndRes.ok, true, `get_window by hwnd must succeed: ${JSON.stringify(gwHwndRes)}`)
-  assert.equal(gwHwndRes.hwnd, notepadHwnd, 'get_window by hwnd must return matching hwnd')
-  assert.equal(gwHwndRes.pid, notepadPid, 'get_window by hwnd must return matching pid')
+  assert.equal(gwHwndRes.hwnd, fixtureHwnd, 'get_window by hwnd must return matching hwnd')
+  assert.equal(gwHwndRes.pid, fixturePid, 'get_window by hwnd must return matching pid')
 
   // 3c. Background key chords with Sky/Mac syntax (never touches foreground)
   const chordKeyRes = await tool.execute({
-    action: 'key',
-    app: String(notepadPid),
+    action: 'press_key',
+    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
     key: 'Control_L+a',
     dispatch: 'background',
     overlay: false,
@@ -139,8 +144,8 @@ try {
   assert.equal(chordKeyRes.ok, true, `background chord key Control_L+a must succeed: ${JSON.stringify(chordKeyRes)}`)
 
   const chordCopyRes = await tool.execute({
-    action: 'key',
-    app: String(notepadPid),
+    action: 'press_key',
+    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
     key: 'ctrl+c',
     dispatch: 'background',
     overlay: false,
@@ -149,7 +154,7 @@ try {
 
   const chordHoldRes = await tool.execute({
     action: 'hold_key',
-    app: String(notepadPid),
+    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
     key: 'ctrl+shift+p',
     duration_ms: 100,
     dispatch: 'background',
@@ -158,30 +163,53 @@ try {
   assert.equal(chordHoldRes.ok, true, `background hold_key ctrl+shift+p must succeed: ${JSON.stringify(chordHoldRes)}`)
 
   // 3c-2. Click with element parameter (resolves element coordinates, not top-left)
+  const clickState = await tool.execute({ action: 'get_window_state', app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}), screenshot: false })
+  assert.equal(clickState.ok, true, `fresh state before element click must succeed: ${JSON.stringify(clickState)}`)
+  const clickElement = clickState.elements.find(element => element.enabled && !element.offscreen && /^(最小化|Minimize)$/.test(element.name))
+  assert.ok(clickElement, `fresh state must expose minimize: ${JSON.stringify(clickState.elements.map(e => ({ name:e.name, role:e.role, invokable:e.invokable, enabled:e.enabled, offscreen:e.offscreen })))}`)
   const clickElRes = await tool.execute({
     action: 'click',
-    app: String(notepadPid),
-    element: 1,
+    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
+    element: clickElement.index,
+    snapshot_id: clickState.snapshot_id,
+    expected_name: clickElement.name,
     dispatch: 'background',
     overlay: false,
   })
-  assert.equal(clickElRes.ok, true, `click with element must succeed: ${JSON.stringify(clickElRes)}`)
+  if (clickElement.invokable) {
+    assert.ok(clickElRes.ok || clickElRes.outcome === 'unknown', JSON.stringify(clickElRes))
+  } else {
+    assert.equal(clickElRes.error_code, 'background_unavailable', 'no UIA pattern must cause a refusal, not an unverified fallback')
+    // Fixture setup only: minimize this exact owned window so the following
+    // observation test does not depend on platform UIA proxy availability.
+    const setup = `$ProgressPreference = 'SilentlyContinue'; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class FixtureSetup { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n); }'; [FixtureSetup]::ShowWindow([IntPtr]${fixtureHwnd}, 6) | Out-Null`
+    execSync(`powershell -NoProfile -EncodedCommand ${Buffer.from(setup, 'utf16le').toString('base64')}`, { windowsHide: true, timeout: 5000 })
+  }
+  let minimized
+  for (let attempt = 0; attempt < 20; attempt++) {
+    minimized = await tool.execute({ action: 'get_window', hwnd: fixtureHwnd })
+    if (minimized.minimized) break
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  assert.equal(minimized.minimized, true, `validated background click must actually minimize the fixture: ${JSON.stringify(clickElRes)}`)
+  const afterMinimize = await tool.execute({ action: 'get_window_state', hwnd: fixtureHwnd, screenshot: false })
+  assert.equal(afterMinimize.error_code, 'background_unavailable', 'background observation must not restore the minimized window')
 
-  // 3d. activate_window on scratch notepad
-  const actRes = await tool.execute({ action: 'activate_window', hwnd: notepadHwnd })
+  // 3d. activate_window on owned fixture
+  const actRes = await tool.execute({ action: 'activate_window', hwnd: fixtureHwnd })
   assert.equal(actRes.ok, true, `activate_window should succeed: ${JSON.stringify(actRes)}`)
-  assert.equal(actRes.hwnd, notepadHwnd, 'activate_window hwnd must match')
+  assert.equal(actRes.hwnd, fixtureHwnd, 'activate_window hwnd must match')
   assert.equal(actRes.activated, true, 'activate_window activated must be true')
 
-  // 3e. close_window on scratch notepad
-  const closeRes = await tool.execute({ action: 'close_window', hwnd: notepadHwnd })
+  // 3e. close_window on owned fixture
+  const closeRes = await tool.execute({ action: 'close_window', hwnd: fixtureHwnd })
   assert.equal(closeRes.ok, true, `close_window should succeed: ${JSON.stringify(closeRes)}`)
-  assert.equal(closeRes.hwnd, notepadHwnd, 'close_window hwnd must match')
+  assert.equal(closeRes.hwnd, fixtureHwnd, 'close_window hwnd must match')
   assert.equal(closeRes.closed, true, 'close_window closed must be true')
 } finally {
-  // Strict cleanup: kill scratch notepad immediately
-  if (notepadPid > 0) {
-    try { execSync(`taskkill /PID ${notepadPid} /F 2>nul || exit 0`, { timeout: 10000, windowsHide: true }) } catch { /* ignore */ }
+  // Strict cleanup: kill owned fixture immediately
+  if (fixturePid > 0) {
+    try { execSync(`taskkill /PID ${fixturePid} /F 2>nul || exit 0`, { timeout: 10000, windowsHide: true }) } catch { /* ignore */ }
   }
   stopDaemon()
 }

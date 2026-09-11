@@ -9,7 +9,7 @@ import { runAction, extractHelperJson } from '../lib/index.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
 
-const helperPath = path.join(rootDir, 'lib', 'computer-use-helper.ps1')
+const helperPath = path.join(rootDir, 'lib', 'pc-pilot-helper.ps1')
 const indexPath = path.join(rootDir, 'lib', 'index.js')
 
 const helperSrc = fs.readFileSync(helperPath, 'utf8')
@@ -112,30 +112,14 @@ assert.match(findInputBody, /while \(\$curr -and \$hops -lt 32\)/,
   'Find-TextInputHwnd parent walk must be capped at 32 hops')
 assert.match(findInputBody, /\$hops\+\+/)
 
-// click_element cursor notification fires for ALL interaction patterns
-const clickElStart = helperSrc.indexOf("'click_element' {")
-const clickElEnd = helperSrc.indexOf("'set_value' {", clickElStart)
-const clickElBody = helperSrc.slice(clickElStart, clickElEnd)
-assert.ok(clickElBody.includes('cursor indicator for ALL element interaction patterns'),
-  'click_element must document the all-patterns cursor notification')
-assert.match(
-  clickElBody,
-  /\$el = Find-ElementByIndex[\s\S]*?if \(\$dispatch -eq 'background'\) \{[\s\S]*?Notify-Cursor[\s\S]*?\}[\s\S]*?\$ip = \$null[\s\S]*?InvokePattern/,
-  'Notify-Cursor must fire before pattern dispatch (Invoke/Toggle/Selection/ExpandCollapse), from the element bounding rect'
-)
-assert.ok(
-  !clickElBody.includes("Notify-Cursor -X (Safe-Int ($el.Current.BoundingRectangle.X"),
-  'InvokePattern-branch-only cursor notification must be removed'
-)
-assert.ok(
-  clickElBody.indexOf('Notify-Cursor') < clickElBody.indexOf('InvokePattern]::Pattern'),
-  'cursor notification must precede the InvokePattern dispatch in click_element'
-)
+// Element-index clicks are implemented by the single canonical click branch.
+assert.match(helperSrc, /'click'[\s\S]*?\$rawElement = Get-PayloadValue 'element'[\s\S]*?Find-ElementByIndex/,
+  'click must handle element_index without a second legacy action branch')
 
 // open_app argument support
 assert.ok(helperSrc.includes('function Split-AppCommand'),
   'helper must define Split-AppCommand for open_app argument handling')
-const openAppStart = helperSrc.indexOf("'open_app' {")
+const openAppStart = helperSrc.indexOf("'launch_app' {")
 const openAppEnd = helperSrc.indexOf('default {', openAppStart)
 const openAppBody = helperSrc.slice(openAppStart, openAppEnd)
 assert.match(openAppBody, /Split-AppCommand -Name/, 'open_app must split name via Split-AppCommand')

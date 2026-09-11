@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
 
 const indexPath = path.join(rootDir, 'lib', 'index.js')
-const helperPath = path.join(rootDir, 'lib', 'computer-use-helper.ps1')
+const helperPath = path.join(rootDir, 'lib', 'pc-pilot-helper.ps1')
 const patchPath = path.join(rootDir, 'cordis.patch.yml')
 
 // 1. Export & schema verification
@@ -20,7 +20,7 @@ const bareTool = defineComputerTool()
 assert.ok(bareTool.parameters.properties, 'defineComputerTool().parameters must have properties object')
 assert.ok(bareTool.parameters.properties.name, 'name property must be present in defineComputerTool().parameters.properties')
 assert.equal(bareTool.parameters.properties.name.type, 'string')
-assert.equal(bareTool.parameters.properties.name.description, 'Application name or executable path (for open_app).')
+assert.equal(bareTool.parameters.properties.name.description, 'Application name or executable path (for launch_app).')
 
 // 2. Static source contract checks
 const indexSrc = fs.readFileSync(indexPath, 'utf8')
@@ -56,25 +56,25 @@ assert.ok(
   "lib/index.js must protect child.stdin with an error handler"
 )
 
-// lib/computer-use-helper.ps1 parameter & encoding checks
+// lib/pc-pilot-helper.ps1 parameter & encoding checks
 assert.ok(
   helperSrc.includes('[switch]$PayloadStdin'),
-  'computer-use-helper.ps1 must declare [switch]$PayloadStdin parameter'
+  'pc-pilot-helper.ps1 must declare [switch]$PayloadStdin parameter'
 )
 assert.ok(
   helperSrc.includes('[Console]::InputEncoding = [System.Text.Encoding]::UTF8'),
-  'computer-use-helper.ps1 must set [Console]::InputEncoding to UTF-8'
+  'pc-pilot-helper.ps1 must set [Console]::InputEncoding to UTF-8'
 )
 assert.ok(
   helperSrc.includes('[Console]::OutputEncoding = [System.Text.Encoding]::UTF8'),
-  'computer-use-helper.ps1 must set [Console]::OutputEncoding to UTF-8'
+  'pc-pilot-helper.ps1 must set [Console]::OutputEncoding to UTF-8'
 )
 assert.ok(
   helperSrc.includes('[Console]::In.ReadToEnd()'),
-  'computer-use-helper.ps1 must read stdin via [Console]::In.ReadToEnd()'
+  'pc-pilot-helper.ps1 must read stdin via [Console]::In.ReadToEnd()'
 )
 
-// lib/computer-use-helper.ps1 scroll WM_MOUSEWHEEL & dead overload checks
+// lib/pc-pilot-helper.ps1 scroll WM_MOUSEWHEEL & dead overload checks
 assert.match(
   helperSrc,
   /SendMessageTimeout\(\$h,\s*0x020A,\s*\$wParam,\s*\$lParam,\s*\[DshWin32\]::SMTO_ABORTIFHUNG,\s*3000,\s*\[ref\]\$res\)/,
@@ -108,23 +108,23 @@ assert.equal(setValueRes.action, 'set_value')
 // Verify type is also directly executed WITHOUT chunking
 const largeText = 'B'.repeat(12000)
 const typeRes = await tool.execute({
-  action: 'type',
+  action: 'type_text',
   app: '__dsh_test_nonexistent_window_12345__',
   text: largeText,
 })
 assert.equal(
   'chunks' in typeRes,
   false,
-  'type execute must directly execute without chunking loop'
+  'type_text execute must directly execute without chunking loop'
 )
-assert.equal(typeRes.action, 'type')
+assert.equal(typeRes.action, 'type_text')
 
 // 4. Verification: Stdin streaming with large (>80KB) JSON payload & Unicode/emoji preservation
 const unicodeSignature = '🚀_🌟_Unicode_测试_€_©_🤖_🎉'
 // >85KB payload: would fail Windows command-line limit (~32KB) if passed on argv
 const largePayloadString = unicodeSignature + '_PADDING_' + 'Z'.repeat(88000)
 
-const streamRes = await runAction('get_app_state', {
+const streamRes = await runAction('get_window_state', {
   app: largePayloadString,
   window_index: 1,
 })

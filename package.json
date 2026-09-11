@@ -1,19 +1,19 @@
 {
   "name": "dsh-pc-pilot",
   "version": "0.2.0",
-  "description": "PC-Pilot - DeepSeek Harness Windows 桌面操作插件：UIA 无障碍树、PrintWindow 截图、后台合成光标输入（UIA Pattern / 窗口消息）与真实 SendInput，AI 窗口可停泊在一块真实的虚拟显示器（IddCx Virtual Display Driver）上隐形运行，配合苹果风格画中画悬浮窗实时镜像工作区，一条命令即可完成虚拟屏安装。Windows computer-use host plugin for DeepSeek Harness: UIA accessibility tree, PrintWindow screenshots, background synthetic-cursor input (UIA patterns / window messages) and real SendInput, with AI windows parked on a real IddCx virtual display and an Apple-style PiP overlay mirroring it live.",
+  "description": "PC-Pilot - DeepSeek Harness Windows computer-use host plugin: standard computer-use actions, ordered batches, UIA accessibility targeting, state-bound screenshots and coordinates, background synthetic input, occlusion-immune per-window capture, and real SendInput fallback.",
   "type": "module",
   "main": "lib/index.js",
-  "bin": {
-    "dsh-pc-pilot": "./bin/setup.mjs"
-  },
   "exports": {
     ".": "./lib/index.js",
     "./package.json": "./package.json"
   },
   "scripts": {
-    "setup": "node bin/setup.mjs",
-    "test": "node test/split-text.check.mjs && node test/native-fixes.check.mjs && node test/ipc-payload.check.mjs && node test/round4-hardening.check.mjs && node test/features.check.mjs && node test/parity.check.mjs && node test/element-cache.check.mjs && node test/cursor-render.check.mjs && node test/codex-parity.check.mjs && node test/fix-validation.check.mjs && node test/pip-overlay.check.mjs && node test/virtual-display.check.mjs && node test/latency.check.mjs"
+    "build:wgc": "dotnet publish native/wgc-capture/wgc-capture.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o lib/wgc",
+    "test": "node scripts/build-helper.mjs --check && node test/split-text.check.mjs && node test/native-fixes.check.mjs && node test/ipc-payload.check.mjs && node test/round4-hardening.check.mjs && node test/features.check.mjs && node test/parity.check.mjs && node test/cua-actions.check.mjs && node test/batch-observation.check.mjs && node test/element-cache.check.mjs && node test/cursor-render.check.mjs && node test/codex-parity.check.mjs && node test/fix-validation.check.mjs && node test/oneshot-stdin.check.mjs && node test/snapshot-contract.check.mjs && node test/process-reliability.check.mjs && node test/background-target.check.mjs && node test/browser-session.check.mjs && node test/browser-statusbar.check.mjs && node test/headless-launch.check.mjs && node test/statusbar.check.mjs && node test/pc-pilot-skill.check.mjs && node test/latency.check.mjs",
+    "build:helper": "node scripts/build-helper.mjs",
+    "check:helper": "node scripts/build-helper.mjs --check",
+    "session": "node scripts/session.mjs"
   },
   "dsh": {
     "bundle": {
@@ -25,8 +25,8 @@
   },
   "dshhub": {
     "schemaVersion": 1,
-    "displayName": "PC-Pilot 虚拟副屏",
-    "summary": "Windows 桌面操作：UIA 无障碍树 + 后台合成输入 + PrintWindow 截图，AI 窗口停泊在真实虚拟显示器上隐形运行、绝不打扰主屏，画中画实时镜像；一条命令完成虚拟屏安装。Windows computer-use with AI windows parked on a real virtual display.",
+    "displayName": "PC-Pilot 电脑操作",
+    "summary": "Windows computer-use：标准动作、顺序批处理、UIA 无障碍定位、绑定状态的 PNG 观察、后台合成输入、遮挡免疫的按窗口截屏与点击，必要时使用真实 SendInput；运行期间屏幕上方显示状态提示条。",
     "categories": [
       "桌面自动化",
       "Windows",
@@ -45,14 +45,10 @@
       "node": ">=22.12"
     },
     "permissions": {
-      "network": [
-        "https://github.com",
-        "https://objects.githubusercontent.com"
-      ]
+      "network": []
     }
   },
   "files": [
-    "bin",
     "lib",
     "cordis.patch.yml",
     "README.md",
@@ -70,8 +66,7 @@
     "accessibility",
     "screenshot",
     "automation",
-    "virtual-display",
-    "picture-in-picture"
+    "occlusion-immune"
   ],
   "author": "JeremyWangCY",
   "repository": {

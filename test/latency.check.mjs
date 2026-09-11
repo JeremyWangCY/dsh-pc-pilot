@@ -17,7 +17,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
 
 // Static contract: daemon mode exists on both sides of the pipe
-const helperSrc = fs.readFileSync(path.join(rootDir, 'lib', 'computer-use-helper.ps1'), 'utf8')
+const helperSrc = fs.readFileSync(path.join(rootDir, 'lib', 'pc-pilot-helper.ps1'), 'utf8')
 const indexSrc = fs.readFileSync(path.join(rootDir, 'lib', 'index.js'), 'utf8')
 const pkgSrc = fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')
 
@@ -32,14 +32,14 @@ assert.ok(!helperSrc.includes('-Depth 8'), 'helper daemon reply depth must be un
 assert.ok(indexSrc.includes("'-Server'"), 'index.js daemon spawn must pass -Server')
 assert.ok(indexSrc.includes('function daemonRequest'), 'index.js must define daemonRequest')
 assert.ok(indexSrc.includes('daemon circuit-breaker open'), 'index.js must implement the circuit breaker')
-assert.ok(indexSrc.includes('return runAction(action, args || {}, signal)'), 'execute must keep the one-shot runAction fallback for non-timeout daemon errors')
+assert.ok(indexSrc.includes('await runAction(action, requestArgs, signal)'), 'execute must keep the one-shot runAction fallback for pre-dispatch daemon errors')
 // judge fix 2: single-flight spawn guard
 assert.ok(indexSrc.includes('if (acquireInFlight) return acquireInFlight'), 'acquireDaemon must share one in-flight spawn promise (single-flight)')
-// judge fix 3: 150s per-request timeout, resolve ok:false WITHOUT one-shot fallback
-assert.ok(indexSrc.includes('}, 150000)'), 'per-request timeout must be 150s (under the 180s tool budget)')
+// Action-specific timeout, resolve ok:false WITHOUT one-shot fallback
+assert.ok(indexSrc.includes('}, actionTimeoutMs(action))'), 'daemon must use the action-specific timeout budget')
 assert.ok(!indexSrc.includes('60000'), 'the old 60s per-request timeout must be gone')
-assert.ok(indexSrc.includes("finish(resolve, { ok: false, action, message: 'daemon request timed out' })"), 'timeout must settle ok:false directly — NOT reject into the fallback')
-const timeoutBlock = indexSrc.slice(indexSrc.indexOf("finish(resolve, { ok: false, action, message: 'daemon request timed out' })"), indexSrc.indexOf('}, 150000)') + 12)
+assert.ok(indexSrc.includes("finish(resolve, unknownOutcome(action, 'daemon request timed out'))"), 'timeout must settle ok:false directly — NOT reject into the fallback')
+const timeoutBlock = indexSrc.slice(indexSrc.indexOf("finish(resolve, unknownOutcome(action, 'daemon request timed out'))"), indexSrc.indexOf('}, actionTimeoutMs(action))') + 28)
 assert.ok(timeoutBlock.includes('noteDaemonFailure()'), 'timeouts must feed the failure-count circuit-breaker path')
 assert.ok(!timeoutBlock.includes('runAction'), 'timeout path must not invoke the one-shot fallback')
 // judge fix 4: id/action spread LAST so args.id cannot clobber correlation
@@ -66,7 +66,7 @@ function countServerHelpers() {
   const psExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const out = execFileSync(psExe, ['-NoProfile', '-Command',
     `(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' AND ParentProcessId=${process.pid}" | ` +
-    `Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'dsh-cua-helper' -and $_.CommandLine -match '-Server' } | Measure-Object).Count`,
+    `Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'pc-pilot-helper' -and $_.CommandLine -match '-Server' } | Measure-Object).Count`,
   ], { encoding: 'utf8', timeout: 60000 })
   return parseInt(String(out).trim(), 10) || 0
 }
