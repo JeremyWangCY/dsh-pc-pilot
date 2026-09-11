@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 import { defineComputerTool, stopDaemon } from '../lib/index.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // 1. Schema assertions: canonical Windows Computer Use plus PC-Pilot extensions.
 const tool = defineComputerTool((def) => def)
@@ -133,6 +138,33 @@ for (const cand of stateCandidates) {
   const res = await tool.execute({ action: 'get_window_state', app: String(cand.pid), hwnd: cand.hwnd, screenshot: true, include_text: true })
   if (res.ok && Array.isArray(res.elements) && res.elements.length > 0 &&
       res.screenshot && typeof res.screenshot.path === 'string' && res.screenshot.path.length > 0) { stateRes = res; break }
+}
+// The user's current desktop may contain only protected, canvas, or minimized
+// surfaces. Keep this test meaningful in that environment by falling back to
+// an owned native window rather than accepting a weaker screenshot assertion.
+if (!stateRes) {
+  let fixturePid = 0
+  try {
+    const fixturePath = path.join(__dirname, 'fixtures', 'native-window.ps1')
+    const launched = await tool.execute({ action: 'launch_app', name: `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${fixturePath}"` })
+    fixturePid = launched.pid
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const windows = await tool.execute({ action: 'list_windows', app: String(fixturePid) })
+      const fixture = windows.windows?.find((window) => window.title === 'PC-Pilot native test fixture')
+      if (fixture) {
+        const candidate = await tool.execute({ action: 'get_window_state', app: String(fixturePid), hwnd: fixture.hwnd, screenshot: true, include_text: true, dispatch: 'foreground' })
+        if (candidate.ok && candidate.elements?.length > 0 && candidate.screenshot?.path) {
+          stateRes = candidate
+          break
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  } finally {
+    if (fixturePid > 0) {
+      try { execFileSync('taskkill', ['/PID', String(fixturePid), '/F'], { windowsHide: true, timeout: 10000 }) } catch { /* fixture already exited */ }
+    }
+  }
 }
 assert.ok(stateRes, `get_window_state must yield a non-empty element tree with a captured screenshot for one of ${stateCandidates.length} candidate windows`)
 assert.ok(stateRes.screenshot, 'get_window_state must return a screenshot object')

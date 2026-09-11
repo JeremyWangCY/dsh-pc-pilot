@@ -59,7 +59,7 @@
 在 DSH profile 目录（`~/.dsh/profiles/web`）内执行：
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.0/dsh-pc-pilot-0.3.0.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.1/dsh-pc-pilot-0.3.1.tgz
 ```
 
 确认 profile 的 `package.json` 中 `dsh.profile.bundles` 数组包含 `"dsh-pc-pilot"`（市场安装会自动加入；手动安装需自行添加），然后重启 DSH 宿主。
