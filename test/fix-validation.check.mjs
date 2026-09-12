@@ -39,6 +39,11 @@ assert.ok(
   openAppBody.includes('WindowStyle $style') || openAppBody.includes('WindowStyle Minimized'),
   'launch_app must use WindowStyle Minimized for clean background launch without flicker'
 )
+assert.match(
+  openAppBody,
+  /\$style\s*=\s*if\s*\(Get-PayloadValue 'activate'.*?\)\s*\{\s*'Normal'\s*}\s*else\s*\{\s*'Minimized'\s*}/s,
+  'launch_app activate:true must select a normal foreground launch while the default remains minimized'
+)
 
 // Click safety is exercised through real helper functions and action branches.
 await import('./background-target.check.mjs')
