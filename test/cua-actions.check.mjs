@@ -17,6 +17,7 @@ assert.ok(parameters.path.oneOf, 'path must accept both drag paths and zoom scre
 assert.equal(parameters.actions.type, 'array')
 assert.equal(parameters.action.required, undefined, 'action is optional when an ordered actions array is supplied')
 assert.ok(parameters.url, 'computer schema must expose initial browser URL')
+assert.equal(parameters.activate.type, 'boolean', 'launch_app foreground activation must be model-callable')
 assert.ok(parameters.include_text, 'computer schema must expose screenshot-first include_text control')
 assert.match(parameters.include_text.description, /default false/i)
 
