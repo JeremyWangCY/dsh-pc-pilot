@@ -3291,10 +3291,22 @@ function Invoke-ActionRequest {
         if (-not [DshWin32]::IsWindow($targetHwnd)) { break }
         Start-Sleep -Milliseconds 50
       }
+      $closed = -not [DshWin32]::IsWindow($targetHwnd)
       $result.hwnd = $targetHwnd.ToInt64()
       $result.title = $title
-      $result.closed = [bool]$sendOk
-      $result.message = "Closed window '$title' (hwnd=$($targetHwnd.ToInt64()))"
+      $result.close_dispatched = [bool]$sendOk
+      $result.closed = [bool]$closed
+      if ($closed) {
+        $result.message = "Closed window '$title' (hwnd=$($targetHwnd.ToInt64()))"
+      } else {
+        # WM_CLOSE may have triggered a save/confirmation prompt or been
+        # rejected. The request reached the window, but the lifecycle outcome
+        # remains unknown and must never be reported as successful cleanup.
+        $result.ok = $false
+        $result.error_code = 'window_close_unconfirmed'
+        $result.needs_observation = $true
+        $result.message = "Close request was sent to '$title', but the window remained open; inspect it before retrying"
+      }
     }
 
     'get_window' {

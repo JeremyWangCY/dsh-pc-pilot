@@ -90,7 +90,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `screenshot` / `zoom` | Full-display or region capture; crop the latest shot |
 | `switch_display` / `cursor_position` | Default capture display; real cursor location |
 | `launch_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); registered Windows activation protocols such as `ms-settings:display` are supported. Delegated app launches return a target only when exactly one new window is safely identifiable; pause between actions |
-| `activate_window` / `close_window` / `get_window` | Bring window to foreground / graceful WM_CLOSE / query fresh window geometry & metadata |
+| `activate_window` / `close_window` / `get_window` | Bring window to foreground / request a graceful WM_CLOSE and verify disappearance (otherwise returns `window_close_unconfirmed`) / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
 | `browser_state` / `browser_shutdown` | List tabs (ids only unless `include_url: true`) or return a bounded semantic snapshot of an AI-owned browser tab (with `page_status`); close the entire browser only when this PC-Pilot tool instance launched it |
 | `browser_click` / `browser_type` / `browser_key` | Operate a token from the latest `browser_state`; stale or changed targets are rejected |
