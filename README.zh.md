@@ -31,7 +31,7 @@
 | 浏览器语义通道 | `browser_state` / `browser_click` / `browser_type` / `browser_key` 只接受 AI 独立 profile 的显式 loopback DevTools endpoint；`launch_app { app: "msedge.exe", headless: true }` 启动该隔离 Chromium 进程（每次启动临时 profile，并自动关闭厂商 welcome 噪音标签页）并返回 endpoint；`browser_*` 永不附着到用户自己的浏览器；标签页、文档、元素 name/role 不一致时拒绝且不重试。快照、可见文本、精确文本定位均覆盖主文档和开放 Shadow DOM；标签页列表默认只返回 tab_id（`include_url: true` 才带 url/title）；标签页快照带 `page_status`，被风控/崩溃/出错页可识别而不是 0 元素假成功。URL 仅限 HTTP(S)，`file://` 被拒绝（本地内容请自起本地 HTTP 服务） |
 | 有界失败语义 | one-shot helper 有外部 watchdog；超时、断连或已派发后的传输错误返回 `outcome: "unknown"`，变更型动作不会自动重放 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
-| 标准动作词汇 | `double_click` / `move` / `scroll_x/scroll_y` / `drag.path` / `keypress.keys`，同时兼容三击和窗口级后台操作 |
+| 标准动作词汇 | 同时接受 OpenAI `double_click` / `type` / `keypress.keys` 与 Windows canonical `click` / `type_text` / `press_key`；支持 `scroll_x/scroll_y`、`drag.path`、三击和窗口级后台操作 |
 | O(1) 元素拾取 | `get_window_state` 在常驻 helper 守护进程内缓存 UIA 元素列表，`click { element_index }` / `set_value` / `perform_secondary_action` / `select_text` / `type_text` 直接 O(1) 命中，不再二次整树遍历 |
 | 真实应用就绪诊断 | 请求 `include_text: true` 时，`accessibility.status` / `accessibility_status` 区分 `available`、`partial` 与 `unavailable`；现代 WinUI/UWP 应用尚未暴露 UIA 树时，明确提示等待重观察或在授权时改走截图绑定的前台路径，绝不虚构元素索引 |
 | 遮挡免疫截图链 | 优先使用随包的 Windows Graphics Capture 按 HWND 抓取目标内容，失败时降级 `PrintWindow` 多旗标阶梯——两级都要求窗口自己渲染帧，遮挡物永远进不了截图；**刻意不提供屏幕 DC 降级**：两级都失败时返回可读的 `screenshot_black` 错误，而不是把遮挡窗口当作目标。没有 .NET 8 时仍可用 `PrintWindow` 路径 |

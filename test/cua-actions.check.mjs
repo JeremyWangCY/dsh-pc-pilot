@@ -9,7 +9,7 @@ assert.deepEqual(actionEnum.slice(0, 13), [
   'click', 'press_key', 'type_text', 'scroll', 'set_value', 'drag',
   'perform_secondary_action', 'activate_window',
 ])
-for (const removed of ['get_app_state', 'open_app', 'click_element', 'type', 'key', 'keypress', 'double_click', 'move', 'perform_action']) {
+for (const removed of ['get_app_state', 'open_app', 'click_element', 'key', 'move', 'perform_action']) {
   assert.ok(!actionEnum.includes(removed), `legacy action must not be model-callable: ${removed}`)
 }
 assert.equal(parameters.keys.type, 'array')
@@ -39,6 +39,16 @@ assert.deepEqual(normalizeComputerAction({ action: 'launch_app', app: 'notepad.e
 })
 assert.equal(normalizeComputerAction({ action: 'press_key', window: { id: 42, app: 'notepad.exe' }, key: 'Return' }).action, 'press_key')
 assert.equal(normalizeComputerAction({ action: 'type_text', text: 'hello' }).action, 'type_text')
+assert.deepEqual(normalizeComputerAction({ action: 'double_click', x: 7, y: 9 }), {
+  requestedAction: 'double_click', action: 'click', args: { action: 'click', x: 7, y: 9, click_count: 2 },
+})
+assert.deepEqual(normalizeComputerAction({ action: 'type', text: 'hello' }), {
+  requestedAction: 'type', action: 'type_text', args: { action: 'type_text', text: 'hello' },
+})
+assert.deepEqual(normalizeComputerAction({ action: 'keypress', keys: ['CTRL', 'L'] }), {
+  requestedAction: 'keypress', action: 'press_key', args: { action: 'press_key', keys: ['CTRL', 'L'], key: 'CTRL+L' },
+})
+for (const alias of ['double_click', 'type', 'keypress']) assert.ok(actionEnum.includes(alias), `OpenAI computer-use alias must be model-callable: ${alias}`)
 assert.deepEqual(normalizeComputerAction({ action: 'perform_secondary_action', secondary_action: 'expand' }), {
   requestedAction: 'perform_secondary_action', action: 'perform_secondary_action', args: { action: 'perform_secondary_action', secondary_action: 'expand' },
 })
@@ -48,6 +58,7 @@ assert.equal(parameters.screenshot_id.type, 'string')
 
 for (const request of [
   { action: 'press_key', key: 'Meta+R' },
+  { action: 'keypress', keys: ['Meta', 'R'] },
   { action: 'hold_key', key: 'Command+space' },
   { action: 'click', x: 1, y: 1, keys: ['Win'] },
 ]) {
