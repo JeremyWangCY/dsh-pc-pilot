@@ -4,3 +4,4 @@ node_modules/
 native/**/bin/
 native/**/obj/
 artifacts/
+lib/wgc/*.pdb

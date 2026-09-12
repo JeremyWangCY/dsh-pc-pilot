@@ -47,7 +47,7 @@ Once listed, search for *dsh-pc-pilot* in the market and click install.
 ### From a GitHub release
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.1/dsh-pc-pilot-0.3.1.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.2/dsh-pc-pilot-0.3.2.tgz
 ```
 
 Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.

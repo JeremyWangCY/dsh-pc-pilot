@@ -20,14 +20,35 @@ function Get-OverlayEnabled {
   return [bool]$o
 }
 
+if ($null -eq $script:processNameCache) { $script:processNameCache = @{} }
+
 function Get-ProcessNameFast {
   param([uint32]$ProcessId, [hashtable]$Cache)
   if ($null -ne $Cache -and $Cache.ContainsKey($ProcessId)) { return $Cache[$ProcessId] }
+
   $name = $null
-  try {
-    $p = [System.Diagnostics.Process]::GetProcessById([int]$ProcessId)
-    $name = $p.ProcessName
-  } catch { }
+  if ($script:processNameCache.ContainsKey($ProcessId)) {
+    $cached = $script:processNameCache[$ProcessId]
+    try {
+      if (-not $cached.process.HasExited) { $name = [string]$cached.name }
+      else {
+        try { $cached.process.Dispose() } catch { }
+        $script:processNameCache.Remove($ProcessId)
+      }
+    } catch {
+      try { $cached.process.Dispose() } catch { }
+      $script:processNameCache.Remove($ProcessId)
+    }
+  }
+
+  if (-not $name) {
+    try {
+      $p = [System.Diagnostics.Process]::GetProcessById([int]$ProcessId)
+      $name = $p.ProcessName
+      $script:processNameCache[$ProcessId] = @{ process = $p; name = $name }
+    } catch { }
+  }
+
   if (-not $name) { $name = "pid:$ProcessId" }
   if ($null -ne $Cache) { $Cache[$ProcessId] = $name }
   return $name

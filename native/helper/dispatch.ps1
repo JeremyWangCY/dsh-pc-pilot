@@ -1,3 +1,84 @@
+$script:devtoolsHttpClient = $null
+
+function Test-ChromiumProfileLocked {
+  param([string]$ProfileDir)
+  if (-not $ProfileDir) { return $false }
+  $lockPath = Join-Path $ProfileDir 'lockfile'
+  if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+
+  $stream = $null
+  try {
+    $stream = [System.IO.File]::Open(
+      $lockPath,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::ReadWrite,
+      [System.IO.FileShare]::None
+    )
+    return $false
+  } catch [System.IO.IOException] {
+    return $true
+  } catch [System.UnauthorizedAccessException] {
+    # Treat an unreadable lock as potentially active; callers can fall back to
+    # the slower process/command-line check before making a destructive choice.
+    return $true
+  } finally {
+    if ($stream) { try { $stream.Dispose() } catch { } }
+  }
+}
+
+function Get-DevToolsHttpClient {
+  if ($script:devtoolsHttpClient) { return $script:devtoolsHttpClient }
+  Add-Type -AssemblyName System.Net.Http
+  $handler = New-Object System.Net.Http.HttpClientHandler
+  $handler.UseProxy = $false
+  $client = New-Object System.Net.Http.HttpClient($handler)
+  $client.Timeout = [TimeSpan]::FromMilliseconds(1000)
+  $script:devtoolsHttpClient = $client
+  return $client
+}
+
+function Test-DevToolsEndpoint {
+  param([int]$Port)
+  $response = $null
+  try {
+    $client = Get-DevToolsHttpClient
+    $response = $client.GetAsync("http://127.0.0.1:$Port/json/version").GetAwaiter().GetResult()
+    return [bool]$response.IsSuccessStatusCode
+  } catch {
+    return $false
+  } finally {
+    if ($response) { try { $response.Dispose() } catch { } }
+  }
+}
+
+function Get-DevToolsJson {
+  param([string]$Uri)
+  $response = $null
+  try {
+    $client = Get-DevToolsHttpClient
+    $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+    if (-not $response.IsSuccessStatusCode) { throw "DevTools HTTP $([int]$response.StatusCode)" }
+    $raw = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    return $raw | ConvertFrom-Json
+  } finally {
+    if ($response) { try { $response.Dispose() } catch { } }
+  }
+}
+
+function Invoke-DevToolsGet {
+  param([string]$Uri)
+  $response = $null
+  try {
+    $client = Get-DevToolsHttpClient
+    $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+    return [bool]$response.IsSuccessStatusCode
+  } catch {
+    return $false
+  } finally {
+    if ($response) { try { $response.Dispose() } catch { } }
+  }
+}
+
 function Split-AppCommand {
   # Split an open_app name like 'notepad.exe C:\foo.txt' or
   # '"C:\Program Files\App\app.exe" --flag "some arg"' into FilePath + ArgumentList.
@@ -1005,9 +1086,9 @@ function Invoke-ActionRequest {
                 Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-24) } |
                 ForEach-Object {
                   $dirPath = $_.FullName
-                  $busy = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe' or Name='chrome.exe' or Name='brave.exe'" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.CommandLine -and $_.CommandLine -like "*$dirPath*" })
-                  if ($busy.Count -eq 0) { Remove-Item -LiteralPath $dirPath -Recurse -Force -ErrorAction SilentlyContinue }
+                  if (-not (Test-ChromiumProfileLocked -ProfileDir $dirPath)) {
+                    Remove-Item -LiteralPath $dirPath -Recurse -Force -ErrorAction SilentlyContinue
+                  }
                 } | Out-Null
             } catch { }
             $aiProfileDir = Join-Path $env:TEMP ("pc-pilot-headless-" + [guid]::NewGuid().ToString('N'))
@@ -1020,7 +1101,10 @@ function Invoke-ActionRequest {
           $debugProfileDir = $aiProfileDir
         }
         $hasRemoteDebugging = $false
-        if ($headless -and $debugProfileDir) {
+        if ($headless -and $debugProfileDir -and (Test-ChromiumProfileLocked -ProfileDir $debugProfileDir)) {
+          # Fresh/idle profiles need no process scan. Only pay the CIM cost when
+          # Chromium's own lock proves that some browser process is using this
+          # profile, preserving the headed-vs-headless distinction below.
           $profilePattern = '--user-data-dir=(?:"' + [regex]::Escape($debugProfileDir) + '"|' + [regex]::Escape($debugProfileDir) + ')(?:\s|$)'
           $existingHeaded = @(Get-CimInstance Win32_Process -Filter "Name='$baseExe.exe'" | Where-Object {
             $_.CommandLine -match $profilePattern -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '--headless(?:=|\s|$)'
@@ -1072,8 +1156,7 @@ function Invoke-ActionRequest {
             $lines = @(Get-Content -LiteralPath $activePort -ErrorAction Stop)
             if ($lines.Count -ge 2 -and $lines[0] -match '^\d+$' -and $lines[1] -match '^/devtools/browser/[A-Za-z0-9-]+$') {
               $port = [int]$lines[0]
-              $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
-              if ($probe.StatusCode -eq 200) {
+              if (Test-DevToolsEndpoint -Port $port) {
                 $result.browser_endpoint = "ws://127.0.0.1:$port$($lines[1])"
                 $result.browser_profile_owned = $true
                 $browserReady = $true
@@ -1090,10 +1173,10 @@ function Invoke-ActionRequest {
         try {
           if ($lines -and $lines.Count -ge 2) {
             $httpBase = "http://127.0.0.1:$($lines[0])"
-            $tabs = Invoke-RestMethod -Uri "$httpBase/json/list" -TimeoutSec 5 -ErrorAction Stop
-            foreach ($t in @($tabs)) {
+            $tabs = @(Get-DevToolsJson -Uri "$httpBase/json/list")
+            foreach ($t in $tabs) {
               if ($t.url -and $t.id -and $t.url -match '^(edge|chrome)://welcome') {
-                Invoke-RestMethod -Uri "$httpBase/json/close/$($t.id)" -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+                $null = Invoke-DevToolsGet -Uri "$httpBase/json/close/$($t.id)"
               }
             }
           }
@@ -1105,9 +1188,15 @@ function Invoke-ActionRequest {
       # Resolve the real top-level window. Chromium's launcher often returns a
       # short-lived broker PID, so a single 80 ms lookup is inherently racy.
       $wins = @()
-      for ($attempt = 0; $attempt -lt 60 -and $wins.Count -eq 0; $attempt++) {
-        Start-Sleep -Milliseconds 50
-        $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
+      # Command hosts and activation protocols are brokers by definition: any
+      # window owned by their Start-Process PID is discarded below, so spending
+      # up to 3s waiting for such a window only adds latency. Go straight to the
+      # delegated-window resolver for those launch shapes.
+      if (-not $isLikelyLauncher -and -not $isActivationProtocol) {
+        for ($attempt = 0; $attempt -lt 60 -and $wins.Count -eq 0; $attempt++) {
+          Start-Sleep -Milliseconds 50
+          $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
+        }
       }
       # A protocol is also routed through Explorer, which may be the user's
       # long-running shell process.  Never return one of its existing windows
@@ -1178,6 +1267,8 @@ function Invoke-ActionRequest {
         # can briefly create a console before the delegated app appears.
         $delegated = @()
         $delegatedProcessCache = @{}
+        $stableDelegatedHwnd = 0L
+        $stableDelegatedPolls = 0
         for ($attempt = 0; $attempt -lt 60; $attempt++) {
           Start-Sleep -Milliseconds 50
           $delegated = @([DshWin32]::EnumWindowsList() | Where-Object {
@@ -1194,6 +1285,21 @@ function Invoke-ActionRequest {
             ($_.Rect.Bottom - $_.Rect.Top) -ge 32 -and
             (-not $isLikelyLauncher -or -not $candidateIsConsoleHost)
           })
+
+          # For command-host launchers the console-shaped transient windows are
+          # already excluded above. Once one GUI HWND remains unchanged for six
+          # consecutive polls (300 ms), waiting out the full 3 s budget adds no
+          # identity confidence. Protocol/UWP launches keep the full settle
+          # window because they may show a splash HWND before the real window.
+          if ($isLikelyLauncher -and $delegated.Count -eq 1) {
+            $candidateHwnd = $delegated[0].Hwnd.ToInt64()
+            if ($candidateHwnd -eq $stableDelegatedHwnd) { $stableDelegatedPolls++ }
+            else { $stableDelegatedHwnd = $candidateHwnd; $stableDelegatedPolls = 1 }
+            if ($stableDelegatedPolls -ge 6) { break }
+          } else {
+            $stableDelegatedHwnd = 0L
+            $stableDelegatedPolls = 0
+          }
         }
         if ($delegated.Count -eq 1) {
           $result.hwnd = $delegated[0].Hwnd.ToInt64()

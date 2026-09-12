@@ -768,14 +768,35 @@ function Get-OverlayEnabled {
   return [bool]$o
 }
 
+if ($null -eq $script:processNameCache) { $script:processNameCache = @{} }
+
 function Get-ProcessNameFast {
   param([uint32]$ProcessId, [hashtable]$Cache)
   if ($null -ne $Cache -and $Cache.ContainsKey($ProcessId)) { return $Cache[$ProcessId] }
+
   $name = $null
-  try {
-    $p = [System.Diagnostics.Process]::GetProcessById([int]$ProcessId)
-    $name = $p.ProcessName
-  } catch { }
+  if ($script:processNameCache.ContainsKey($ProcessId)) {
+    $cached = $script:processNameCache[$ProcessId]
+    try {
+      if (-not $cached.process.HasExited) { $name = [string]$cached.name }
+      else {
+        try { $cached.process.Dispose() } catch { }
+        $script:processNameCache.Remove($ProcessId)
+      }
+    } catch {
+      try { $cached.process.Dispose() } catch { }
+      $script:processNameCache.Remove($ProcessId)
+    }
+  }
+
+  if (-not $name) {
+    try {
+      $p = [System.Diagnostics.Process]::GetProcessById([int]$ProcessId)
+      $name = $p.ProcessName
+      $script:processNameCache[$ProcessId] = @{ process = $p; name = $name }
+    } catch { }
+  }
+
   if (-not $name) { $name = "pid:$ProcessId" }
   if ($null -ne $Cache) { $Cache[$ProcessId] = $name }
   return $name
@@ -1800,40 +1821,73 @@ function Test-BitmapBlank {
   return $true
 }
 
-function Invoke-WgcCapture {
-  # Optional .NET 8 bridge. It captures the target HWND through Windows Graphics
-  # Capture, so the returned pixels belong to the target even when another window
-  # is covering it. Any bridge failure is deliberately silent here: the caller
-  # still has the occlusion-immune PrintWindow fallback below.
-  param([IntPtr]$Hwnd, [string]$Path)
+$script:wgcServer = $null
+
+function Reset-WgcCaptureServer {
+  if ($script:wgcServer) {
+    try { if (-not $script:wgcServer.HasExited) { $script:wgcServer.Kill() } } catch { }
+    try { $script:wgcServer.Dispose() } catch { }
+  }
+  $script:wgcServer = $null
+}
+
+function Get-WgcCaptureServer {
   $exe = Join-Path (Join-Path $env:TEMP 'dsh-cua-wgc') 'dsh-pc-pilot-wgc.exe'
   if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { return $null }
+  if ($script:wgcServer) {
+    try { if (-not $script:wgcServer.HasExited) { return $script:wgcServer } } catch { }
+    Reset-WgcCaptureServer
+  }
+
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $exe
-  $safePath = ([string]$Path).Replace('"', '')
-  $psi.Arguments = ('"{0}" "{1}"' -f $Hwnd.ToInt64(), $safePath)
+  $psi.Arguments = '--server'
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
+  $psi.RedirectStandardInput = $true
   $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
+  $psi.RedirectStandardError = $false
   $proc = New-Object System.Diagnostics.Process
   $proc.StartInfo = $psi
   try {
-    if (-not $proc.Start()) { return $null }
-    if (-not $proc.WaitForExit(3500)) {
-      try { $proc.Kill() } catch { }
-      return @{ ok = $false; error = 'wgc_timeout' }
+    if (-not $proc.Start()) { $proc.Dispose(); return $null }
+    $script:wgcServer = $proc
+    return $proc
+  } catch {
+    try { $proc.Dispose() } catch { }
+    return $null
+  }
+}
+
+function Invoke-WgcCapture {
+  # Keep one .NET 8 WGC bridge alive for the PowerShell helper lifetime. Reusing
+  # its D3D11/WinRT device removes process + GPU-device setup from every frame.
+  # A broken bridge is discarded; this frame falls back to PrintWindow and the
+  # next observation starts a fresh bridge.
+  param([IntPtr]$Hwnd, [string]$Path)
+  $safePath = ([string]$Path).Replace('"', '').Replace([string][char]9, '').Replace([string][char]13, '').Replace([string][char]10, '')
+  $proc = Get-WgcCaptureServer
+  if (-not $proc) { return $null }
+  try {
+    $proc.StandardInput.WriteLine(('{0}{1}{2}' -f $Hwnd.ToInt64(), [char]9, $safePath))
+    $proc.StandardInput.Flush()
+    # The bridge owns its bounded 2.5s frame timeout. Keep this pipe read simple
+    # and synchronous; the outer PC-Pilot action timeout remains the final guard
+    # if the bridge process itself becomes unhealthy.
+    $line = [string]$proc.StandardOutput.ReadLine()
+    if (-not $line) {
+      Reset-WgcCaptureServer
+      return @{ ok = $false; error = 'wgc_capture_failed'; detail = 'wgc_server_closed_pipe' }
     }
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $dims = [regex]::Match($stdout, '(?m)^\s*(\d+)\s+(\d+)\s*$')
-    if ($proc.ExitCode -ne 0 -or -not $dims.Success -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-      return @{ ok = $false; error = 'wgc_capture_failed' }
+    $dims = [regex]::Match($line, '^OK\s+(\d+)\s+(\d+)$')
+    if (-not $dims.Success -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+      if ($line -notmatch '^ERR\s+') { Reset-WgcCaptureServer }
+      return @{ ok = $false; error = 'wgc_capture_failed'; detail = $line }
     }
     return @{ ok = $true; width = [int]$dims.Groups[1].Value; height = [int]$dims.Groups[2].Value }
   } catch {
+    Reset-WgcCaptureServer
     return @{ ok = $false; error = 'wgc_capture_exception' }
-  } finally {
-    try { $proc.Dispose() } catch { }
   }
 }
 
@@ -1909,6 +1963,11 @@ function Do-AppState {
         height = $h
         scale = 1
         window_rect = @{ x = $win.Rect.Left; y = $win.Rect.Top }
+        method = 'print_window'
+      }
+      if ($wgc -and -not $wgc.ok) {
+        $shot.wgc_error = $wgc.error
+        if ($wgc.detail) { $shot.wgc_detail = $wgc.detail }
       }
       if ($minimized) { $shot.error = 'window_minimized; screenshot is blank' }
     } elseif (-not $minimized) {
@@ -1963,12 +2022,40 @@ function Do-AppState {
     # permanent WinUI/UWP limitation; only probe it twice (500ms) before
     # returning the explicit unavailable diagnosis.  We retain the largest tree
     # seen, and never turn a missing provider into a fake element target.
-    if ($tree.Count -le 2) {
+    $needsStabilization = ($tree.Count -le 2)
+    if ($tree.Count -gt 0 -and $tree.Count -le 2) {
+      for ($i = 0; $i -lt $tree.Count; $i++) {
+        $item = $tree[$i]
+        $role = '' + $item.role
+        $name = '' + $item.name
+        $value = '' + $item.value
+        $autoId = '' + $item.automation_id
+        $hasSemanticControl = $item.invokable -or $value -or $autoId -or
+          ($name -and $role -match '(?i)(Button|Edit|Text|ListItem|MenuItem|CheckBox|RadioButton|ComboBox|TabItem|Hyperlink|Slider|TreeItem)')
+        if ($hasSemanticControl) { $needsStabilization = $false; break }
+      }
+    }
+    if ($needsStabilization) {
       $retryLimit = if ($tree.Count -eq 0) { 2 } else { 8 }
-      for ($attempt = 0; $attempt -lt $retryLimit -and $tree.Count -le 2; $attempt++) {
+      for ($attempt = 0; $attempt -lt $retryLimit -and $needsStabilization; $attempt++) {
         Start-Sleep -Milliseconds 250
         $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
         if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+
+        if ($tree.Count -gt 2) {
+          $needsStabilization = $false
+        } elseif ($tree.Count -gt 0) {
+          for ($i = 0; $i -lt $tree.Count; $i++) {
+            $item = $tree[$i]
+            $role = '' + $item.role
+            $name = '' + $item.name
+            $value = '' + $item.value
+            $autoId = '' + $item.automation_id
+            $hasSemanticControl = $item.invokable -or $value -or $autoId -or
+              ($name -and $role -match '(?i)(Button|Edit|Text|ListItem|MenuItem|CheckBox|RadioButton|ComboBox|TabItem|Hyperlink|Slider|TreeItem)')
+            if ($hasSemanticControl) { $needsStabilization = $false; break }
+          }
+        }
       }
     }
     if ($tree.Count -eq 0) { $accessibilityStatus = 'unavailable' }
@@ -2009,6 +2096,87 @@ function Do-AppState {
 }
 
 # ---------------------------------------------------------------- actions
+$script:devtoolsHttpClient = $null
+
+function Test-ChromiumProfileLocked {
+  param([string]$ProfileDir)
+  if (-not $ProfileDir) { return $false }
+  $lockPath = Join-Path $ProfileDir 'lockfile'
+  if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) { return $false }
+
+  $stream = $null
+  try {
+    $stream = [System.IO.File]::Open(
+      $lockPath,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::ReadWrite,
+      [System.IO.FileShare]::None
+    )
+    return $false
+  } catch [System.IO.IOException] {
+    return $true
+  } catch [System.UnauthorizedAccessException] {
+    # Treat an unreadable lock as potentially active; callers can fall back to
+    # the slower process/command-line check before making a destructive choice.
+    return $true
+  } finally {
+    if ($stream) { try { $stream.Dispose() } catch { } }
+  }
+}
+
+function Get-DevToolsHttpClient {
+  if ($script:devtoolsHttpClient) { return $script:devtoolsHttpClient }
+  Add-Type -AssemblyName System.Net.Http
+  $handler = New-Object System.Net.Http.HttpClientHandler
+  $handler.UseProxy = $false
+  $client = New-Object System.Net.Http.HttpClient($handler)
+  $client.Timeout = [TimeSpan]::FromMilliseconds(1000)
+  $script:devtoolsHttpClient = $client
+  return $client
+}
+
+function Test-DevToolsEndpoint {
+  param([int]$Port)
+  $response = $null
+  try {
+    $client = Get-DevToolsHttpClient
+    $response = $client.GetAsync("http://127.0.0.1:$Port/json/version").GetAwaiter().GetResult()
+    return [bool]$response.IsSuccessStatusCode
+  } catch {
+    return $false
+  } finally {
+    if ($response) { try { $response.Dispose() } catch { } }
+  }
+}
+
+function Get-DevToolsJson {
+  param([string]$Uri)
+  $response = $null
+  try {
+    $client = Get-DevToolsHttpClient
+    $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+    if (-not $response.IsSuccessStatusCode) { throw "DevTools HTTP $([int]$response.StatusCode)" }
+    $raw = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    return $raw | ConvertFrom-Json
+  } finally {
+    if ($response) { try { $response.Dispose() } catch { } }
+  }
+}
+
+function Invoke-DevToolsGet {
+  param([string]$Uri)
+  $response = $null
+  try {
+    $client = Get-DevToolsHttpClient
+    $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+    return [bool]$response.IsSuccessStatusCode
+  } catch {
+    return $false
+  } finally {
+    if ($response) { try { $response.Dispose() } catch { } }
+  }
+}
+
 function Split-AppCommand {
   # Split an open_app name like 'notepad.exe C:\foo.txt' or
   # '"C:\Program Files\App\app.exe" --flag "some arg"' into FilePath + ArgumentList.
@@ -3016,9 +3184,9 @@ function Invoke-ActionRequest {
                 Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-24) } |
                 ForEach-Object {
                   $dirPath = $_.FullName
-                  $busy = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe' or Name='chrome.exe' or Name='brave.exe'" -ErrorAction SilentlyContinue |
-                    Where-Object { $_.CommandLine -and $_.CommandLine -like "*$dirPath*" })
-                  if ($busy.Count -eq 0) { Remove-Item -LiteralPath $dirPath -Recurse -Force -ErrorAction SilentlyContinue }
+                  if (-not (Test-ChromiumProfileLocked -ProfileDir $dirPath)) {
+                    Remove-Item -LiteralPath $dirPath -Recurse -Force -ErrorAction SilentlyContinue
+                  }
                 } | Out-Null
             } catch { }
             $aiProfileDir = Join-Path $env:TEMP ("pc-pilot-headless-" + [guid]::NewGuid().ToString('N'))
@@ -3031,7 +3199,10 @@ function Invoke-ActionRequest {
           $debugProfileDir = $aiProfileDir
         }
         $hasRemoteDebugging = $false
-        if ($headless -and $debugProfileDir) {
+        if ($headless -and $debugProfileDir -and (Test-ChromiumProfileLocked -ProfileDir $debugProfileDir)) {
+          # Fresh/idle profiles need no process scan. Only pay the CIM cost when
+          # Chromium's own lock proves that some browser process is using this
+          # profile, preserving the headed-vs-headless distinction below.
           $profilePattern = '--user-data-dir=(?:"' + [regex]::Escape($debugProfileDir) + '"|' + [regex]::Escape($debugProfileDir) + ')(?:\s|$)'
           $existingHeaded = @(Get-CimInstance Win32_Process -Filter "Name='$baseExe.exe'" | Where-Object {
             $_.CommandLine -match $profilePattern -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '--headless(?:=|\s|$)'
@@ -3083,8 +3254,7 @@ function Invoke-ActionRequest {
             $lines = @(Get-Content -LiteralPath $activePort -ErrorAction Stop)
             if ($lines.Count -ge 2 -and $lines[0] -match '^\d+$' -and $lines[1] -match '^/devtools/browser/[A-Za-z0-9-]+$') {
               $port = [int]$lines[0]
-              $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 1 -UseBasicParsing -ErrorAction Stop
-              if ($probe.StatusCode -eq 200) {
+              if (Test-DevToolsEndpoint -Port $port) {
                 $result.browser_endpoint = "ws://127.0.0.1:$port$($lines[1])"
                 $result.browser_profile_owned = $true
                 $browserReady = $true
@@ -3101,10 +3271,10 @@ function Invoke-ActionRequest {
         try {
           if ($lines -and $lines.Count -ge 2) {
             $httpBase = "http://127.0.0.1:$($lines[0])"
-            $tabs = Invoke-RestMethod -Uri "$httpBase/json/list" -TimeoutSec 5 -ErrorAction Stop
-            foreach ($t in @($tabs)) {
+            $tabs = @(Get-DevToolsJson -Uri "$httpBase/json/list")
+            foreach ($t in $tabs) {
               if ($t.url -and $t.id -and $t.url -match '^(edge|chrome)://welcome') {
-                Invoke-RestMethod -Uri "$httpBase/json/close/$($t.id)" -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+                $null = Invoke-DevToolsGet -Uri "$httpBase/json/close/$($t.id)"
               }
             }
           }
@@ -3116,9 +3286,15 @@ function Invoke-ActionRequest {
       # Resolve the real top-level window. Chromium's launcher often returns a
       # short-lived broker PID, so a single 80 ms lookup is inherently racy.
       $wins = @()
-      for ($attempt = 0; $attempt -lt 60 -and $wins.Count -eq 0; $attempt++) {
-        Start-Sleep -Milliseconds 50
-        $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
+      # Command hosts and activation protocols are brokers by definition: any
+      # window owned by their Start-Process PID is discarded below, so spending
+      # up to 3s waiting for such a window only adds latency. Go straight to the
+      # delegated-window resolver for those launch shapes.
+      if (-not $isLikelyLauncher -and -not $isActivationProtocol) {
+        for ($attempt = 0; $attempt -lt 60 -and $wins.Count -eq 0; $attempt++) {
+          Start-Sleep -Milliseconds 50
+          $wins = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Pid -eq $proc.Id })
+        }
       }
       # A protocol is also routed through Explorer, which may be the user's
       # long-running shell process.  Never return one of its existing windows
@@ -3189,6 +3365,8 @@ function Invoke-ActionRequest {
         # can briefly create a console before the delegated app appears.
         $delegated = @()
         $delegatedProcessCache = @{}
+        $stableDelegatedHwnd = 0L
+        $stableDelegatedPolls = 0
         for ($attempt = 0; $attempt -lt 60; $attempt++) {
           Start-Sleep -Milliseconds 50
           $delegated = @([DshWin32]::EnumWindowsList() | Where-Object {
@@ -3205,6 +3383,21 @@ function Invoke-ActionRequest {
             ($_.Rect.Bottom - $_.Rect.Top) -ge 32 -and
             (-not $isLikelyLauncher -or -not $candidateIsConsoleHost)
           })
+
+          # For command-host launchers the console-shaped transient windows are
+          # already excluded above. Once one GUI HWND remains unchanged for six
+          # consecutive polls (300 ms), waiting out the full 3 s budget adds no
+          # identity confidence. Protocol/UWP launches keep the full settle
+          # window because they may show a splash HWND before the real window.
+          if ($isLikelyLauncher -and $delegated.Count -eq 1) {
+            $candidateHwnd = $delegated[0].Hwnd.ToInt64()
+            if ($candidateHwnd -eq $stableDelegatedHwnd) { $stableDelegatedPolls++ }
+            else { $stableDelegatedHwnd = $candidateHwnd; $stableDelegatedPolls = 1 }
+            if ($stableDelegatedPolls -ge 6) { break }
+          } else {
+            $stableDelegatedHwnd = 0L
+            $stableDelegatedPolls = 0
+          }
         }
         if ($delegated.Count -eq 1) {
           $result.hwnd = $delegated[0].Hwnd.ToInt64()

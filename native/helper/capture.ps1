@@ -31,40 +31,73 @@ function Test-BitmapBlank {
   return $true
 }
 
-function Invoke-WgcCapture {
-  # Optional .NET 8 bridge. It captures the target HWND through Windows Graphics
-  # Capture, so the returned pixels belong to the target even when another window
-  # is covering it. Any bridge failure is deliberately silent here: the caller
-  # still has the occlusion-immune PrintWindow fallback below.
-  param([IntPtr]$Hwnd, [string]$Path)
+$script:wgcServer = $null
+
+function Reset-WgcCaptureServer {
+  if ($script:wgcServer) {
+    try { if (-not $script:wgcServer.HasExited) { $script:wgcServer.Kill() } } catch { }
+    try { $script:wgcServer.Dispose() } catch { }
+  }
+  $script:wgcServer = $null
+}
+
+function Get-WgcCaptureServer {
   $exe = Join-Path (Join-Path $env:TEMP 'dsh-cua-wgc') 'dsh-pc-pilot-wgc.exe'
   if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { return $null }
+  if ($script:wgcServer) {
+    try { if (-not $script:wgcServer.HasExited) { return $script:wgcServer } } catch { }
+    Reset-WgcCaptureServer
+  }
+
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $exe
-  $safePath = ([string]$Path).Replace('"', '')
-  $psi.Arguments = ('"{0}" "{1}"' -f $Hwnd.ToInt64(), $safePath)
+  $psi.Arguments = '--server'
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
+  $psi.RedirectStandardInput = $true
   $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
+  $psi.RedirectStandardError = $false
   $proc = New-Object System.Diagnostics.Process
   $proc.StartInfo = $psi
   try {
-    if (-not $proc.Start()) { return $null }
-    if (-not $proc.WaitForExit(3500)) {
-      try { $proc.Kill() } catch { }
-      return @{ ok = $false; error = 'wgc_timeout' }
+    if (-not $proc.Start()) { $proc.Dispose(); return $null }
+    $script:wgcServer = $proc
+    return $proc
+  } catch {
+    try { $proc.Dispose() } catch { }
+    return $null
+  }
+}
+
+function Invoke-WgcCapture {
+  # Keep one .NET 8 WGC bridge alive for the PowerShell helper lifetime. Reusing
+  # its D3D11/WinRT device removes process + GPU-device setup from every frame.
+  # A broken bridge is discarded; this frame falls back to PrintWindow and the
+  # next observation starts a fresh bridge.
+  param([IntPtr]$Hwnd, [string]$Path)
+  $safePath = ([string]$Path).Replace('"', '').Replace([string][char]9, '').Replace([string][char]13, '').Replace([string][char]10, '')
+  $proc = Get-WgcCaptureServer
+  if (-not $proc) { return $null }
+  try {
+    $proc.StandardInput.WriteLine(('{0}{1}{2}' -f $Hwnd.ToInt64(), [char]9, $safePath))
+    $proc.StandardInput.Flush()
+    # The bridge owns its bounded 2.5s frame timeout. Keep this pipe read simple
+    # and synchronous; the outer PC-Pilot action timeout remains the final guard
+    # if the bridge process itself becomes unhealthy.
+    $line = [string]$proc.StandardOutput.ReadLine()
+    if (-not $line) {
+      Reset-WgcCaptureServer
+      return @{ ok = $false; error = 'wgc_capture_failed'; detail = 'wgc_server_closed_pipe' }
     }
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $dims = [regex]::Match($stdout, '(?m)^\s*(\d+)\s+(\d+)\s*$')
-    if ($proc.ExitCode -ne 0 -or -not $dims.Success -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-      return @{ ok = $false; error = 'wgc_capture_failed' }
+    $dims = [regex]::Match($line, '^OK\s+(\d+)\s+(\d+)$')
+    if (-not $dims.Success -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+      if ($line -notmatch '^ERR\s+') { Reset-WgcCaptureServer }
+      return @{ ok = $false; error = 'wgc_capture_failed'; detail = $line }
     }
     return @{ ok = $true; width = [int]$dims.Groups[1].Value; height = [int]$dims.Groups[2].Value }
   } catch {
+    Reset-WgcCaptureServer
     return @{ ok = $false; error = 'wgc_capture_exception' }
-  } finally {
-    try { $proc.Dispose() } catch { }
   }
 }
 
@@ -140,6 +173,11 @@ function Do-AppState {
         height = $h
         scale = 1
         window_rect = @{ x = $win.Rect.Left; y = $win.Rect.Top }
+        method = 'print_window'
+      }
+      if ($wgc -and -not $wgc.ok) {
+        $shot.wgc_error = $wgc.error
+        if ($wgc.detail) { $shot.wgc_detail = $wgc.detail }
       }
       if ($minimized) { $shot.error = 'window_minimized; screenshot is blank' }
     } elseif (-not $minimized) {
@@ -194,12 +232,40 @@ function Do-AppState {
     # permanent WinUI/UWP limitation; only probe it twice (500ms) before
     # returning the explicit unavailable diagnosis.  We retain the largest tree
     # seen, and never turn a missing provider into a fake element target.
-    if ($tree.Count -le 2) {
+    $needsStabilization = ($tree.Count -le 2)
+    if ($tree.Count -gt 0 -and $tree.Count -le 2) {
+      for ($i = 0; $i -lt $tree.Count; $i++) {
+        $item = $tree[$i]
+        $role = '' + $item.role
+        $name = '' + $item.name
+        $value = '' + $item.value
+        $autoId = '' + $item.automation_id
+        $hasSemanticControl = $item.invokable -or $value -or $autoId -or
+          ($name -and $role -match '(?i)(Button|Edit|Text|ListItem|MenuItem|CheckBox|RadioButton|ComboBox|TabItem|Hyperlink|Slider|TreeItem)')
+        if ($hasSemanticControl) { $needsStabilization = $false; break }
+      }
+    }
+    if ($needsStabilization) {
       $retryLimit = if ($tree.Count -eq 0) { 2 } else { 8 }
-      for ($attempt = 0; $attempt -lt $retryLimit -and $tree.Count -le 2; $attempt++) {
+      for ($attempt = 0; $attempt -lt $retryLimit -and $needsStabilization; $attempt++) {
         Start-Sleep -Milliseconds 250
         $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
         if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+
+        if ($tree.Count -gt 2) {
+          $needsStabilization = $false
+        } elseif ($tree.Count -gt 0) {
+          for ($i = 0; $i -lt $tree.Count; $i++) {
+            $item = $tree[$i]
+            $role = '' + $item.role
+            $name = '' + $item.name
+            $value = '' + $item.value
+            $autoId = '' + $item.automation_id
+            $hasSemanticControl = $item.invokable -or $value -or $autoId -or
+              ($name -and $role -match '(?i)(Button|Edit|Text|ListItem|MenuItem|CheckBox|RadioButton|ComboBox|TabItem|Hyperlink|Slider|TreeItem)')
+            if ($hasSemanticControl) { $needsStabilization = $false; break }
+          }
+        }
       }
     }
     if ($tree.Count -eq 0) { $accessibilityStatus = 'unavailable' }
