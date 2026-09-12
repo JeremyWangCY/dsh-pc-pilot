@@ -1156,15 +1156,27 @@ function Invoke-ActionRequest {
         # Some real Windows apps (notably packaged/UWP apps) receive activation
         # through a broker.  The PID returned by Start-Process then owns no
         # window even though a new app window appears.  Adopt it only when the
-        # desktop delta has exactly one viable candidate; otherwise leave the
-        # identity unresolved rather than risking a user's pre-existing window.
+        # settled desktop delta has exactly one viable candidate; otherwise leave
+        # the identity unresolved rather than risking a user's pre-existing
+        # window.  In particular, do not stop at the first delta: command hosts
+        # can briefly create a console before the delegated app appears.
         $delegated = @()
-        for ($attempt = 0; $attempt -lt 60 -and $delegated.Count -eq 0; $attempt++) {
+        $delegatedProcessCache = @{}
+        for ($attempt = 0; $attempt -lt 60; $attempt++) {
           Start-Sleep -Milliseconds 50
           $delegated = @([DshWin32]::EnumWindowsList() | Where-Object {
+            $candidateProcess = if ($isLikelyLauncher) { Get-ProcessNameFast -ProcessId $_.Pid -Cache $delegatedProcessCache } else { '' }
+            $candidateTitle = ([string]$_.Title).Trim()
+            # A command host can also be the process that owns a genuine GUI
+            # (for example a script-hosted WinForms app), so reject only its
+            # recognizable console window rather than every PowerShell process.
+            $candidateIsConsoleHost = $candidateProcess -in @('cmd', 'WindowsTerminal', 'OpenConsole', 'conhost') -or (
+              ($candidateProcess -in @('powershell', 'pwsh')) -and $candidateTitle -match '(?i)^(Windows PowerShell|PowerShell|管理员:|Administrator:)'
+            )
             ($preLaunchHwnds -notcontains $_.Hwnd.ToInt64()) -and $_.Title -and
             -not $_.Minimized -and ($_.Rect.Right - $_.Rect.Left) -ge 50 -and
-            ($_.Rect.Bottom - $_.Rect.Top) -ge 32
+            ($_.Rect.Bottom - $_.Rect.Top) -ge 32 -and
+            (-not $isLikelyLauncher -or -not $candidateIsConsoleHost)
           })
         }
         if ($delegated.Count -eq 1) {

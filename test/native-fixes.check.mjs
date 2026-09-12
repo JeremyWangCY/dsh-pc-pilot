@@ -178,6 +178,11 @@ assert.match(
   /\$isActivationProtocol = \$filePath -match '\^\[A-Za-z\]\[A-Za-z0-9\+\.\-\]\*:\(\?!\[\\\\\/\]\)'/,
   'Windows drive-letter executables must not be mistaken for activation protocols'
 )
+assert.match(
+  helperContent,
+  /\$delegatedProcessCache = @\{\}[\s\S]*?for \(\$attempt = 0; \$attempt -lt 60; \$attempt\+\+\)[\s\S]*?WindowsTerminal.*?OpenConsole.*?conhost[\s\S]*?candidateIsConsoleHost/s,
+  'delegated command-host launches must wait for the settled desktop delta and exclude transient console hosts without rejecting a script-hosted GUI'
+)
 assert.ok(
   helperContent.includes("'uia_window_hit_'"),
   'app-scoped semantic hits must be tagged with the uia_window_hit_ method prefix'
