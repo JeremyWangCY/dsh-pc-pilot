@@ -163,6 +163,24 @@ try {
     assert.deepEqual({ ok: value.ok, action: value.action, outcome: value.outcome }, { ok: true, action: 'click', outcome: undefined })
     assert.equal(value.post_action_observation.ok, true)
   })
+  await check('verified set_value requests a fresh observation', async m => {
+    const tool = m.defineComputerTool(d => d)
+    const p = tool.execute({ action: 'set_value', app: 'fixture', hwnd: 42, element_index: 1, snapshot_id: 'fresh', value: 'updated' })
+    await flush()
+    const child = children[0]
+    const write = JSON.parse(child.writes[0])
+    assert.equal(write.action, 'set_value')
+    child.stdout.emit('data', JSON.stringify({ id: write.id, ok: true, action: 'set_value', method: 'value_pattern', verified: true }) + '\n')
+    await flush()
+    assert.equal(child.writes.length, 2, 'verified set_value must request a fresh observation')
+    const observation = JSON.parse(child.writes[1])
+    assert.equal(observation.action, 'get_window_state')
+    assert.equal(observation.hwnd, 42)
+    child.stdout.emit('data', JSON.stringify({ id: observation.id, ok: true }) + '\n')
+    const value = await settled(p)
+    assert.equal(value.ok, true)
+    assert.equal(value.post_action_observation.ok, true)
+  })
   for (const [action, budget] of [['click', 20000], ['wait', 40000]]) {
     await check(`${action}: daemon and one-shot budgets`, async m => {
       const tool = m.defineComputerTool(d => d)
