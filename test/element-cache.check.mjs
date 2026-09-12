@@ -37,6 +37,7 @@ try {
   })
   assert.equal(screenshotOnly.ok, true, `screenshot-first state must succeed: ${JSON.stringify(screenshotOnly.message)}`)
   assert.equal(screenshotOnly.accessibility, null, 'include_text:false must not return an accessibility tree')
+  assert.equal(screenshotOnly.accessibility_status, 'not_requested', 'screenshot-first state must not be mislabeled as unavailable UIA')
   assert.deepEqual(screenshotOnly.screenshots, [], 'a state without a capture must retain the canonical empty screenshots array')
   assert.deepEqual(screenshotOnly.elements, [], 'include_text:false must not build element indexes')
 
