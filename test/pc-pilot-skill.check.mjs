@@ -5,7 +5,7 @@ import { apply, defineComputerTool } from '../lib/index.js'
 assert.equal(PC_PILOT_SKILL.name, 'pc-pilot')
 assert.equal(PC_PILOT_SKILL.source, 'runtime')
 assert.match(PC_PILOT_SKILL.description, /Windows desktop|Chromium browser/i)
-for (const rule of ['get_window_state', 'element_index', 'snapshot_id', 'browser_state', 'browser_endpoint', '`unknown`', 'background']) {
+for (const rule of ['get_window_state', 'element_index', 'snapshot_id', 'accessibility_status', 'browser_state', 'browser_endpoint', '`unknown`', 'background']) {
   assert.ok(PC_PILOT_SKILL.content.includes(rule), `skill must teach ${rule}`)
 }
 
