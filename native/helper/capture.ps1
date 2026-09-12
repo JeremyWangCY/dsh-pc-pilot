@@ -189,13 +189,14 @@ function Do-AppState {
     $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
     # DESK-03: a freshly launched Win11 Notepad (and several WinUI apps) can
     # expose only a root pane or no descendants while the first frame settles.
-    # Make a bounded 2s stabilization pass in this exceptional case; a caller
-    # asking for indexed controls should get the ready tree when it appears,
-    # rather than burn another model turn on a known startup race.  We retain
-    # the largest tree seen, and still report partial/unavailable if it never
-    # becomes useful.
+    # A partial tree has evidence that the provider is coming up, so allow it a
+    # bounded 2s stabilization pass.  A completely absent tree is commonly a
+    # permanent WinUI/UWP limitation; only probe it twice (500ms) before
+    # returning the explicit unavailable diagnosis.  We retain the largest tree
+    # seen, and never turn a missing provider into a fake element target.
     if ($tree.Count -le 2) {
-      for ($attempt = 0; $attempt -lt 8 -and $tree.Count -le 2; $attempt++) {
+      $retryLimit = if ($tree.Count -eq 0) { 2 } else { 8 }
+      for ($attempt = 0; $attempt -lt $retryLimit -and $tree.Count -le 2; $attempt++) {
         Start-Sleep -Milliseconds 250
         $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
         if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
