@@ -16,6 +16,8 @@ try {
   })
   assert.equal(launched.ok, true, JSON.stringify(launched))
   assert.ok(Number.isInteger(launched.hwnd) && launched.hwnd > 0, `delegated launch must return an HWND: ${JSON.stringify(launched)}`)
+  assert.equal(launched.window?.id, launched.hwnd, `delegated launch must return a reusable window id: ${JSON.stringify(launched)}`)
+  assert.match(String(launched.window?.app), /powershell/i, `delegated launch must identify the verified window process: ${JSON.stringify(launched)}`)
   const observed = await tool.execute({ action: 'get_window', hwnd: launched.hwnd })
   assert.equal(observed.ok, true, JSON.stringify(observed))
   assert.equal(observed.window.title, 'PC-Pilot native test fixture', JSON.stringify(observed))

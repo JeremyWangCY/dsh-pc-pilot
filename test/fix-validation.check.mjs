@@ -82,6 +82,8 @@ try {
   notepadHwnd = openRes.hwnd
   assert.ok(Number.isInteger(notepadPid) && notepadPid > 0, 'open_app must return valid pid')
   assert.ok(Number.isInteger(notepadHwnd) && notepadHwnd > 0, 'open_app must return valid hwnd')
+  assert.equal(openRes.window?.id, notepadHwnd, 'launch_app must return a reusable Computer Use window id')
+  assert.equal(openRes.window?.app?.toLowerCase(), 'notepad', 'launch_app window must identify the verified process')
 
   // Verify the newly opened window did NOT steal foreground
   const gwInit = await tool.execute({ action: 'get_window', hwnd: notepadHwnd })

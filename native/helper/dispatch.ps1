@@ -1133,8 +1133,10 @@ function Invoke-ActionRequest {
         } | Sort-Object @{Expression={($_.Rect.Right-$_.Rect.Left)*($_.Rect.Bottom-$_.Rect.Top)};Descending=$true})
         if ($preferred.Count -gt 0) { $wins = $preferred }
       }
+      $resolvedWindow = $null
       if ($wins.Count -gt 0) {
         $result.hwnd = $wins[0].Hwnd.ToInt64()
+        $resolvedWindow = $wins[0]
         # A persistent profile may still contain Chrome's session-restore
         # bubble even with the startup flag. Dismiss only the small popup close
         # button inside this exact owned window before returning control.
@@ -1182,6 +1184,7 @@ function Invoke-ActionRequest {
         if ($delegated.Count -eq 1) {
           $result.hwnd = $delegated[0].Hwnd.ToInt64()
           $result.pid = $delegated[0].Pid
+          $resolvedWindow = $delegated[0]
           $result.delegated_launch = $true
           $result.message += '; resolved one newly-created delegated app window'
         } elseif ($delegated.Count -gt 1) {
@@ -1191,6 +1194,13 @@ function Invoke-ActionRequest {
           $result.window_unavailable = $true
           $result.message += '; launcher returned no top-level window (use list_windows to select an existing or late window)'
         }
+      }
+      if ($resolvedWindow) {
+        # A launch result is immediately reusable by the next Computer Use
+        # action.  Return the same verified id/app object as get_window instead
+        # of making callers re-discover a window we just identified.
+        $result.process_name = Get-ProcessNameFast -ProcessId $resolvedWindow.Pid -Cache $null
+        $result.window = Get-WindowInfo $resolvedWindow
       }
     }
 
