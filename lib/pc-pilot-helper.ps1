@@ -560,15 +560,18 @@ public static class DshWin32
   {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(50);
     uint downF = 0x0002, upF = 0x0004;
+    uint mouseData = 0;
     string b = (button ?? "left").Trim().ToLowerInvariant();
     if (b == "right") { downF = 0x0008; upF = 0x0010; }
     else if (b == "middle") { downF = 0x0020; upF = 0x0040; }
+    else if (b == "back") { downF = 0x0080; upF = 0x0100; mouseData = 0x0001; }
+    else if (b == "forward") { downF = 0x0080; upF = 0x0100; mouseData = 0x0002; }
     if (count < 1) count = 1;
     if (count > 3) count = 3;
     for (int i = 0; i < count; i++)
     {
-      INPUT[] d = new INPUT[] { MkMouse(downF, 0) };
-      INPUT[] u = new INPUT[] { MkMouse(upF, 0) };
+      INPUT[] d = new INPUT[] { MkMouse(downF, mouseData) };
+      INPUT[] u = new INPUT[] { MkMouse(upF, mouseData) };
       SendInput(1, d, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(25);
       SendInput(1, u, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(25);
     }
@@ -669,10 +672,13 @@ public static class DshWin32
   {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(30);
     uint flag = 0x0002;
+    uint mouseData = 0;
     string b = (button ?? "left").Trim().ToLowerInvariant();
     if (b == "right") flag = 0x0008;
     else if (b == "middle") flag = 0x0020;
-    INPUT[] d = new INPUT[] { MkMouse(flag, 0) };
+    else if (b == "back") { flag = 0x0080; mouseData = 0x0001; }
+    else if (b == "forward") { flag = 0x0080; mouseData = 0x0002; }
+    INPUT[] d = new INPUT[] { MkMouse(flag, mouseData) };
     SendInput(1, d, Marshal.SizeOf(typeof(INPUT)));
   }
 
@@ -680,10 +686,13 @@ public static class DshWin32
   {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(30);
     uint flag = 0x0004;
+    uint mouseData = 0;
     string b = (button ?? "left").Trim().ToLowerInvariant();
     if (b == "right") flag = 0x0010;
     else if (b == "middle") flag = 0x0040;
-    INPUT[] u = new INPUT[] { MkMouse(flag, 0) };
+    else if (b == "back") { flag = 0x0100; mouseData = 0x0001; }
+    else if (b == "forward") { flag = 0x0100; mouseData = 0x0002; }
+    INPUT[] u = new INPUT[] { MkMouse(flag, mouseData) };
     SendInput(1, u, Marshal.SizeOf(typeof(INPUT)));
   }
 
@@ -1461,6 +1470,8 @@ function Send-BackgroundMouseButton {
   $msgDown = 0x0201; $msgUp = 0x0202; $msgDbl = 0x0203; $wDown = 0x0001
   if ($Button -eq 'right') { $msgDown = 0x0204; $msgUp = 0x0205; $msgDbl = 0x0206; $wDown = 0x0002 }
   elseif ($Button -eq 'middle') { $msgDown = 0x0207; $msgUp = 0x0208; $msgDbl = 0x0209; $wDown = 0x0010 }
+  elseif ($Button -eq 'back') { $msgDown = 0x020B; $msgUp = 0x020C; $msgDbl = 0x020D; $wDown = 0x00010000 }
+  elseif ($Button -eq 'forward') { $msgDown = 0x020B; $msgUp = 0x020C; $msgDbl = 0x020D; $wDown = 0x00020000 }
   $modVks = @(); $wMods = 0
   if ($Modifiers) {
     foreach ($part in ($Modifiers -split '[,+]')) {
@@ -2160,8 +2171,8 @@ function Invoke-MouseButtonAction {
   $button = Get-PayloadValue 'button'
   if (-not $button) { $button = 'left' }
   $button = ([string]$button).ToLowerInvariant()
-  if ($button -notin @('left', 'right', 'middle')) {
-    throw "invalid mouse button: $button (expected 'left', 'right', or 'middle')"
+  if ($button -notin @('left', 'right', 'middle', 'back', 'forward')) {
+    throw "invalid mouse button: $button (expected 'left', 'right', 'middle', 'back', or 'forward')"
   }
   $app = Get-PayloadValue 'app'
   $rawX = Get-PayloadValue 'x'
@@ -2230,6 +2241,14 @@ function Invoke-MouseButtonAction {
         'middle' {
           if ($IsDown) { $msg = 0x0207; $wParam = [IntPtr]0x0010 }
           else { $msg = 0x0208; $wParam = [IntPtr]0x0000 }
+        }
+        'back' {
+          if ($IsDown) { $msg = 0x020B; $wParam = [IntPtr]0x00010000 }
+          else { $msg = 0x020C; $wParam = [IntPtr]0x00010000 }
+        }
+        'forward' {
+          if ($IsDown) { $msg = 0x020B; $wParam = [IntPtr]0x00020000 }
+          else { $msg = 0x020C; $wParam = [IntPtr]0x00020000 }
         }
       }
       $cpt = [DshWin32]::ScreenToClientPoint($h, $sx, $sy)
@@ -2329,8 +2348,8 @@ function Invoke-ActionRequest {
       $button = Get-PayloadValue 'button'
       if (-not $button) { $button = 'left' }
       $button = ([string]$button).ToLowerInvariant()
-      if ($button -notin @('left', 'right', 'middle')) {
-        throw "invalid mouse button: $button (expected 'left', 'right', or 'middle')"
+      if ($button -notin @('left', 'right', 'middle', 'back', 'forward')) {
+        throw "invalid mouse button: $button (expected 'left', 'right', 'middle', 'back', or 'forward')"
       }
       $clickCount = 1
       $rawCount = Get-PayloadValue 'click_count'

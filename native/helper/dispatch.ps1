@@ -160,8 +160,8 @@ function Invoke-MouseButtonAction {
   $button = Get-PayloadValue 'button'
   if (-not $button) { $button = 'left' }
   $button = ([string]$button).ToLowerInvariant()
-  if ($button -notin @('left', 'right', 'middle')) {
-    throw "invalid mouse button: $button (expected 'left', 'right', or 'middle')"
+  if ($button -notin @('left', 'right', 'middle', 'back', 'forward')) {
+    throw "invalid mouse button: $button (expected 'left', 'right', 'middle', 'back', or 'forward')"
   }
   $app = Get-PayloadValue 'app'
   $rawX = Get-PayloadValue 'x'
@@ -230,6 +230,14 @@ function Invoke-MouseButtonAction {
         'middle' {
           if ($IsDown) { $msg = 0x0207; $wParam = [IntPtr]0x0010 }
           else { $msg = 0x0208; $wParam = [IntPtr]0x0000 }
+        }
+        'back' {
+          if ($IsDown) { $msg = 0x020B; $wParam = [IntPtr]0x00010000 }
+          else { $msg = 0x020C; $wParam = [IntPtr]0x00010000 }
+        }
+        'forward' {
+          if ($IsDown) { $msg = 0x020B; $wParam = [IntPtr]0x00020000 }
+          else { $msg = 0x020C; $wParam = [IntPtr]0x00020000 }
         }
       }
       $cpt = [DshWin32]::ScreenToClientPoint($h, $sx, $sy)
@@ -329,8 +337,8 @@ function Invoke-ActionRequest {
       $button = Get-PayloadValue 'button'
       if (-not $button) { $button = 'left' }
       $button = ([string]$button).ToLowerInvariant()
-      if ($button -notin @('left', 'right', 'middle')) {
-        throw "invalid mouse button: $button (expected 'left', 'right', or 'middle')"
+      if ($button -notin @('left', 'right', 'middle', 'back', 'forward')) {
+        throw "invalid mouse button: $button (expected 'left', 'right', 'middle', 'back', or 'forward')"
       }
       $clickCount = 1
       $rawCount = Get-PayloadValue 'click_count'

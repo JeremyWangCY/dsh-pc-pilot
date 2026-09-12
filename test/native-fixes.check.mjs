@@ -158,6 +158,16 @@ assert.match(
   /function Invoke-MouseButtonAction[\s\S]{0,4000}\$h = Find-TargetHwndAt -Hwnd \$win\.Hwnd/,
   'mouse_down/mouse_up must resolve app-scoped presses via Find-TargetHwndAt'
 )
+assert.match(
+  helperContent,
+  /function Send-BackgroundMouseButton[\s\S]*?\$Button -eq 'back'[\s\S]*?0x020B[\s\S]*?\$Button -eq 'forward'[\s\S]*?0x00020000/,
+  'background clicks must encode Windows XBUTTON back/forward messages'
+)
+assert.match(
+  helperContent,
+  /public static void MouseClickEx[\s\S]*?b == "back"[\s\S]*?downF = 0x0080[\s\S]*?mouseData = 0x0001[\s\S]*?b == "forward"[\s\S]*?mouseData = 0x0002/,
+  'foreground clicks must encode XBUTTON back/forward SendInput data'
+)
 assert.ok(
   helperContent.includes("'uia_window_hit_'"),
   'app-scoped semantic hits must be tagged with the uia_window_hit_ method prefix'

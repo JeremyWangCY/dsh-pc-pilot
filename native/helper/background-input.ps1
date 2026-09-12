@@ -194,6 +194,8 @@ function Send-BackgroundMouseButton {
   $msgDown = 0x0201; $msgUp = 0x0202; $msgDbl = 0x0203; $wDown = 0x0001
   if ($Button -eq 'right') { $msgDown = 0x0204; $msgUp = 0x0205; $msgDbl = 0x0206; $wDown = 0x0002 }
   elseif ($Button -eq 'middle') { $msgDown = 0x0207; $msgUp = 0x0208; $msgDbl = 0x0209; $wDown = 0x0010 }
+  elseif ($Button -eq 'back') { $msgDown = 0x020B; $msgUp = 0x020C; $msgDbl = 0x020D; $wDown = 0x00010000 }
+  elseif ($Button -eq 'forward') { $msgDown = 0x020B; $msgUp = 0x020C; $msgDbl = 0x020D; $wDown = 0x00020000 }
   $modVks = @(); $wMods = 0
   if ($Modifiers) {
     foreach ($part in ($Modifiers -split '[,+]')) {

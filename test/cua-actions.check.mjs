@@ -31,6 +31,10 @@ assert.equal(normalizeComputerAction({ action: 'click', screenshotId: 'shot-1' }
 assert.equal(normalizeComputerAction({ action: 'click', mouse_button: 'l' }).args.button, 'left')
 assert.equal(normalizeComputerAction({ action: 'click', mouse_button: 'r' }).args.button, 'right')
 assert.equal(normalizeComputerAction({ action: 'click', mouse_button: 'm' }).args.button, 'middle')
+assert.equal(normalizeComputerAction({ action: 'click', button: 'wheel' }).args.button, 'middle')
+for (const button of ['left', 'right', 'middle', 'wheel', 'back', 'forward']) {
+  assert.ok(parameters.button.enum.includes(button), `OpenAI click button must be model-callable: ${button}`)
+}
 assert.deepEqual(normalizeComputerAction({ action: 'get_window_state', window: { id: 42, app: 'notepad.exe' }, include_screenshot: false }), {
   requestedAction: 'get_window_state', action: 'get_window_state', args: { action: 'get_window_state', window: { id: 42, app: 'notepad.exe' }, include_screenshot: false, hwnd: 42, app: 'notepad.exe', screenshot: false },
 })

@@ -560,15 +560,18 @@ public static class DshWin32
   {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(50);
     uint downF = 0x0002, upF = 0x0004;
+    uint mouseData = 0;
     string b = (button ?? "left").Trim().ToLowerInvariant();
     if (b == "right") { downF = 0x0008; upF = 0x0010; }
     else if (b == "middle") { downF = 0x0020; upF = 0x0040; }
+    else if (b == "back") { downF = 0x0080; upF = 0x0100; mouseData = 0x0001; }
+    else if (b == "forward") { downF = 0x0080; upF = 0x0100; mouseData = 0x0002; }
     if (count < 1) count = 1;
     if (count > 3) count = 3;
     for (int i = 0; i < count; i++)
     {
-      INPUT[] d = new INPUT[] { MkMouse(downF, 0) };
-      INPUT[] u = new INPUT[] { MkMouse(upF, 0) };
+      INPUT[] d = new INPUT[] { MkMouse(downF, mouseData) };
+      INPUT[] u = new INPUT[] { MkMouse(upF, mouseData) };
       SendInput(1, d, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(25);
       SendInput(1, u, Marshal.SizeOf(typeof(INPUT))); System.Threading.Thread.Sleep(25);
     }
@@ -669,10 +672,13 @@ public static class DshWin32
   {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(30);
     uint flag = 0x0002;
+    uint mouseData = 0;
     string b = (button ?? "left").Trim().ToLowerInvariant();
     if (b == "right") flag = 0x0008;
     else if (b == "middle") flag = 0x0020;
-    INPUT[] d = new INPUT[] { MkMouse(flag, 0) };
+    else if (b == "back") { flag = 0x0080; mouseData = 0x0001; }
+    else if (b == "forward") { flag = 0x0080; mouseData = 0x0002; }
+    INPUT[] d = new INPUT[] { MkMouse(flag, mouseData) };
     SendInput(1, d, Marshal.SizeOf(typeof(INPUT)));
   }
 
@@ -680,10 +686,13 @@ public static class DshWin32
   {
     SetCursorPos(x, y); System.Threading.Thread.Sleep(30);
     uint flag = 0x0004;
+    uint mouseData = 0;
     string b = (button ?? "left").Trim().ToLowerInvariant();
     if (b == "right") flag = 0x0010;
     else if (b == "middle") flag = 0x0040;
-    INPUT[] u = new INPUT[] { MkMouse(flag, 0) };
+    else if (b == "back") { flag = 0x0100; mouseData = 0x0001; }
+    else if (b == "forward") { flag = 0x0100; mouseData = 0x0002; }
+    INPUT[] u = new INPUT[] { MkMouse(flag, mouseData) };
     SendInput(1, u, Marshal.SizeOf(typeof(INPUT)));
   }
 

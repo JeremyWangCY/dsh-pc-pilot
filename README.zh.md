@@ -116,7 +116,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | --- | --- | --- |
 | `list_apps` / `list_windows` / `list_displays` | 列出运行中的应用 / 单应用多窗口 / 显示器拓扑 | 无 / `app`? / 无 |
 | `get_window_state` | 默认截图优先；`include_text: true` 时构建索引化无障碍树并附带 `document_text` | `window`、`include_screenshot`、`include_text` |
-| `click` | 标准坐标、左右/中键与多击，或绑定快照的 UIA 元素点击 | `window`、`x`、`y`、`mouse_button`、`click_count`；元素动作还需 `element_index`、`snapshot_id` |
+| `click` | 标准坐标、左/右/中键、`wheel`（中键）、扩展 `back` / `forward` 键与多击，或绑定快照的 UIA 元素点击 | `window`、`x`、`y`、`mouse_button`、`click_count`；元素动作还需 `element_index`、`snapshot_id` |
 | `set_value` | 直接替换元素文本值（UIA ValuePattern） | `window`、`element_index`、`snapshot_id`、`value` |
 | `type_text` | 向已验证焦点输入文本 | `window`、`text` |
 | `perform_secondary_action` | 对元素执行命名 UIA 动作（invoke / toggle / select / expand / collapse / focus / scroll_*） | `window`、`element_index`、`snapshot_id`、`secondary_action` |
