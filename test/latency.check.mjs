@@ -32,7 +32,11 @@ assert.ok(!helperSrc.includes('-Depth 8'), 'helper daemon reply depth must be un
 assert.ok(indexSrc.includes("'-Server'"), 'index.js daemon spawn must pass -Server')
 assert.ok(indexSrc.includes('function daemonRequest'), 'index.js must define daemonRequest')
 assert.ok(indexSrc.includes('daemon circuit-breaker open'), 'index.js must implement the circuit breaker')
-assert.ok(indexSrc.includes('await runAction(action, requestArgs, signal)'), 'execute must keep the one-shot runAction fallback for pre-dispatch daemon errors')
+assert.match(
+  indexSrc,
+  /const invokeNative = async \(nativeArgs\) => \{[\s\S]*?await daemonRequest\(action, nativeArgs, signal\)[\s\S]*?catch \(err\) \{ return runAction\(action, nativeArgs, signal\) \}/,
+  'execute must keep the one-shot runAction fallback for pre-dispatch daemon errors'
+)
 // judge fix 2: single-flight spawn guard
 assert.ok(indexSrc.includes('if (acquireInFlight) return acquireInFlight'), 'acquireDaemon must share one in-flight spawn promise (single-flight)')
 // Action-specific timeout, resolve ok:false WITHOUT one-shot fallback
