@@ -122,7 +122,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `perform_secondary_action` | 对元素执行命名 UIA 动作（invoke / toggle / select / expand / collapse / focus / scroll_*） | `window`、`element_index`、`snapshot_id`、`secondary_action` |
 | `select_text` | 选中元素文本范围（TextPattern）；`length: 0` 仅定位光标 | `app`、`element`、`start`、`length` |
 | `press_key` / `hold_key` | 标准 keysym 风格组合键与定时按住；Windows/Meta/Command 键会被拒绝 | `window`、`key`、`duration_ms` |
-| `scroll` | 标准滚动增量，或旧式滚轮刻度 | `x`、`y`、`scroll_x`、`scroll_y`，或 `amount`、`direction` |
+| `scroll` | 标准滚动增量（同时给出横纵轴时两者均会执行），或旧式滚轮刻度 | `x`、`y`、`scroll_x`、`scroll_y`，或 `amount`、`direction` |
 | `mouse_down` / `mouse_up` | 原始鼠标原语 | `x`、`y`、`button`；无法安全后台投递时返回 `background_unavailable` |
 | `drag` | 标准有序路径，或旧式端点；前台真实 SendInput 逐段拖动，后台 UIA 移动返回端点模式 | `path`，或 `from_x`、`from_y`、`to_x`、`to_y` |
 | `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |

@@ -23,6 +23,10 @@ assert.match(parameters.include_text.description, /default false/i)
 assert.deepEqual(normalizeComputerAction({ action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0 }).args, {
   action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0, scroll_x: 240, scroll_y: 0, amount: 2, direction: 'right',
 })
+assert.deepEqual(normalizeComputerAction({ action: 'scroll', scroll_x: 120, scroll_y: -240 }).args.scroll_components, [
+  { amount: 1, direction: 'right' },
+  { amount: 2, direction: 'up' },
+])
 assert.deepEqual(normalizeComputerAction({ action: 'drag', path: [[1, 2], [30, 40], [50, 60]] }).args, {
   action: 'drag', path: [[1, 2], [30, 40], [50, 60]], from_x: 1, from_y: 2, to_x: 50, to_y: 60,
 })
