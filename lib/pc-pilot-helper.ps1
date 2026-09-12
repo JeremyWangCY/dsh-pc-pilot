@@ -3063,7 +3063,7 @@ function Invoke-ActionRequest {
       } else {
         Start-Process -FilePath $filePath -WindowStyle $style -PassThru
       }
-      $result.message = "Started $filePath ($($argList.Count) argument(s)) (launched $style in background)"
+      $result.message = "Started $filePath ($($argList.Count) argument(s)) (launched $style; $launchDisposition)"
       $result.pid = $proc.Id
       if ($isActivationProtocol) { $result.activation_protocol = $filePath }
       if ($debugProfileDir) {
@@ -3223,6 +3223,21 @@ function Invoke-ActionRequest {
         # of making callers re-discover a window we just identified.
         $result.process_name = Get-ProcessNameFast -ProcessId $resolvedWindow.Pid -Cache $null
         $result.window = Get-WindowInfo $resolvedWindow
+        if ($style -eq 'Normal') {
+          # Start-Process WindowStyle Normal does not guarantee foreground
+          # ownership under Windows' focus-stealing rules. The explicit
+          # activate/foreground opt-in must use the same verified activation
+          # path as activate_window before we report the launch result.
+          [DshWin32]::ForceForeground($resolvedWindow.Hwnd)
+          $fgHwnd = [DshWin32]::GetForegroundWindow()
+          $result.activated = [bool]($fgHwnd -eq $resolvedWindow.Hwnd -or [DshWin32]::IsChild($resolvedWindow.Hwnd, $fgHwnd))
+          if (-not $result.activated) {
+            $result.ok = $false
+            $result.error_code = 'window_activation_unconfirmed'
+            $result.needs_observation = $true
+            $result.message += '; foreground activation could not be confirmed'
+          }
+        }
       }
     }
 
@@ -3700,7 +3715,8 @@ finally {
   # Universal non-intrusive background guard: In background dispatch mode, the user's active window must NEVER be stolen!
   # If the target app (e.g. Edge/Chromium UIA Invoke, WM messages) activates itself,
   # immediately demote the target window to bottom and restore the user's active window!
-  if ($dispatchMode -eq 'background' -and $Action -notin @('activate_window') -and $prevUserFg -ne [IntPtr]::Zero) {
+  $foregroundLaunchRequested = ($Action -eq 'launch_app' -and [bool](Get-PayloadValue 'activate'))
+  if ($dispatchMode -eq 'background' -and -not $foregroundLaunchRequested -and $Action -notin @('activate_window') -and $prevUserFg -ne [IntPtr]::Zero) {
     $curFg = [DshWin32]::GetForegroundWindow()
     if ($curFg -ne [IntPtr]::Zero -and $curFg -ne $prevUserFg) {
       [DshWin32]::PushWindowToBottom($curFg) | Out-Null

@@ -140,6 +140,7 @@ The helper is a single self-contained `pc-pilot-helper.ps1` copied to `%TEMP%` o
 - **Desktop icons vanish / gray boxes appear** — this is a Windows shell (WorkerW) glitch typically caused by desktop-organizer or wallpaper tools, not by this plugin; restarting `explorer.exe` restores the desktop.
 - **`background_unavailable`** — the target has no verified background path (canvas, some WinUI surfaces, unsupported native controls). Decide per task whether to go `foreground`; the helper refuses an unverified coordinate fallback.
 - **`accessibility_status: unavailable`** — the HWND and screenshot are valid, but the application exposed no usable UI Automation descendants. Wait and observe again; if it remains unavailable, use a screenshot-bound foreground path only when the task permits it. Never invent an `element_index`.
+- **`window_activation_unconfirmed`** — an explicitly foreground-launched app did not become the foreground window after the verified activation attempt. The launch may have succeeded, but foreground control did not; observe the returned window instead of assuming focus.
 - **`screenshot_black`** — the target is DirectComposition/UWP without the WGC bridge, hardware-accelerated, or hung, so neither occlusion-immune tier could render it. Bring the window forward with `dispatch: "foreground"` (or `activate_window`) and retry.
 
 ## Development

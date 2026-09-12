@@ -78,6 +78,7 @@ assert.ok(
 const tool = defineComputerTool((def) => def)
 let notepadPid = 0
 let notepadHwnd = 0
+let foregroundNotepadPid = 0
 
 try {
   // 2a. Test silent open_app: verify it returns real pid and hwnd, and does NOT steal foreground
@@ -95,6 +96,17 @@ try {
   assert.equal(gwInit.ok, true, 'get_window on scratch notepad must succeed')
   assert.equal(gwInit.window.foreground, false, 'scratch notepad launched silently must NOT be in foreground')
 
+  // Explicit foreground activation is the opt-in real-app compatibility path.
+  // It must report what happened and be cleaned up by its exact owned PID.
+  const foregroundRes = await tool.execute({ action: 'launch_app', name: 'notepad', activate: true, overlay: false })
+  foregroundNotepadPid = Number.isSafeInteger(foregroundRes.pid) ? foregroundRes.pid : 0
+  assert.equal(foregroundRes.ok, true, `foreground notepad launch failed: ${JSON.stringify(foregroundRes)}`)
+  assert.ok(foregroundNotepadPid > 0, 'foreground launch must return a valid owned PID')
+  assert.match(foregroundRes.message || '', /launched Normal; foreground/, 'foreground launch must report its real disposition')
+  const foregroundWindow = await tool.execute({ action: 'get_window', window: foregroundRes.window, overlay: false })
+  assert.equal(foregroundWindow.ok, true, 'get_window on foreground scratch notepad must succeed')
+  assert.equal(foregroundWindow.window.foreground, true, 'activate:true must bring the scratch app to foreground')
+
   // 2b. Test get_app_state: verify elements have both rect and screen_rect
   const stateRes = await tool.execute({ action: 'get_window_state', window: openRes.window, screenshot: false, include_text: true, dispatch: 'foreground' })
   assert.equal(stateRes.ok, true, 'get_app_state must succeed')
@@ -107,6 +119,9 @@ try {
   // Snapshot/cache behavior is covered separately by element-cache and snapshot tests.
 
 } finally {
+  if (foregroundNotepadPid > 0) {
+    try { execFileSync('taskkill', ['/PID', String(foregroundNotepadPid), '/T', '/F'], { timeout: 10000, windowsHide: true, stdio: 'ignore' }) } catch { /* ignore */ }
+  }
   if (notepadPid > 0) {
     try { execFileSync('taskkill', ['/PID', String(notepadPid), '/T', '/F'], { timeout: 10000, windowsHide: true, stdio: 'ignore' }) } catch { /* ignore */ }
   }

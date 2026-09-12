@@ -196,6 +196,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | 光标可见但位置偏移 | 安装版本必须调用 `SetProcessDPIAware`（≥ 0.1.0 均有）；DPI 感知不匹配会使位置按缩放系数偏移（如 125% 下偏 25%） |
 | 桌面图标消失 / 出现灰色方块 | Windows shell（WorkerW）故障，通常由桌面整理或壁纸类工具触发，**与本插件无关**（本插件从不触碰 Progman/WorkerW）；重启 `explorer.exe` 即可恢复 |
 | 返回 `background_unavailable` | 目标没有经过验证的后台路径（画布、部分 WinUI 表面、不支持的原生控件）。按任务判断是否切 `foreground`；helper 不会执行未经验证的坐标回退 |
+| 返回 `window_activation_unconfirmed` | 明确要求前台启动的应用在经过激活后仍未成为前台窗口。应用本身可能已启动，但前台控制没有得到确认；应观察返回的 `window`，不能假定已有焦点 |
 | 截图黑屏/空白 | 截图链只有遮挡免疫两级：WGC 按 HWND 捕获，失败再走 `PrintWindow` 旗标阶梯（2→0→3）。DirectComposition/UWP 无 WGC、硬件加速或挂起时两级都无法渲染，返回 `screenshot_black` 错误——此时用 `dispatch: "foreground"`（或 `activate_window`）把窗口带到前台再试 |
 
 ## 开发
