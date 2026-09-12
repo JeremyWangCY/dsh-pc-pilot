@@ -42,9 +42,11 @@ try {
   assert.deepEqual(screenshotOnly.elements, [], 'include_text:false must not build element indexes')
 
   const waited = await tool.execute({
-    action: 'wait', duration_s: 0.01, app: String(notepadPid), include_text: true,
+    action: 'wait', duration_s: 2, app: String(notepadPid), include_text: true, wait_for: 'accessibility_present',
   })
   assert.equal(waited.ok, true, `window-targeted wait must succeed: ${JSON.stringify(waited)}`)
+  assert.equal(waited.ready, true, 'accessibility_present must explicitly confirm a usable tree before proceeding')
+  assert.ok(['partial', 'available'].includes(waited.accessibility_status), 'condition result must expose the observed readiness status')
   assert.ok(['available', 'partial'].includes(waited.post_action_observation?.accessibility_status),
     `wait must return a ready-state diagnosis when include_text is requested: ${JSON.stringify(waited.post_action_observation)}`)
   assert.equal(waited.post_action_observation?.accessibility?.status, waited.post_action_observation?.accessibility_status,

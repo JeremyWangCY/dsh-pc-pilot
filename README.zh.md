@@ -127,7 +127,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `drag` | 标准有序路径，或旧式端点；前台真实 SendInput 逐段拖动，后台 UIA 移动返回端点模式 | `path`，或 `from_x`、`from_y`、`to_x`、`to_y` |
 | `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |
 | `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
-| `launch_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点）；支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回目标；带窗口与 `include_text: true` 的 `wait` 会在后置观察中返回 UIA 就绪状态 / 动作间等待 | `app` / `duration_s` |
+| `launch_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点）；支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回目标；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `duration_s` / `wait_for` |
 | `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
 | `browser_state` | 列出标签页（默认仅 tab_id，`include_url: true` 才带 url/title），或返回 AI 独立浏览器标签页的有界语义快照（含 `page_status`） | `browser_endpoint`、`tab_id`?、`include_url`? |

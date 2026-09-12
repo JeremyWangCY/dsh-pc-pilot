@@ -102,6 +102,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `overlay` | `true` | Show the click-through cursor at each action point; it auto-hides 3 s after the last action. |
 | `include_screenshot` | `true` | Capture a per-window PNG in `get_window_state`. |
 | `include_text` | `false` | Include the indexed accessibility tree and document text when an element action is needed. On a window-targeted `wait`, include it in the post-wait observation to check application readiness without a second round-trip. |
+| `wait_for` | — | On a window-targeted `wait`, wait for `accessibility_present` (any UIA descendant) or `accessibility_available` (a complete UIA tree). A timeout is an explicit, retry-safe `wait_condition_timeout`. |
 | `app` | — | pid number, process name, or window-title substring; same-titled duplicate windows are rejected unless `window_index` or `hwnd` identifies one, while differently titled windows of one app auto-resolve and return `chosen_hwnd`. |
 | `snapshot_id` | — | Required for desktop element actions; use the id from the latest `get_window_state { include_text: true }`. |
 | `browser_endpoint` / `tab_id` / `browser_element` | — | Explicit loopback DevTools endpoint, exact tab id, and token from the latest `browser_state`. |

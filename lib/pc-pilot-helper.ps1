@@ -3307,10 +3307,46 @@ function Invoke-ActionRequest {
       $dur = if ($null -eq $rawDur) { 1 } else { [double]$rawDur }
       if ($dur -lt 0) { $dur = 0 }
       if ($dur -gt 30) { $dur = 30 }
-      # Start-Sleep -Seconds is int-typed in PS 5.1 — use Milliseconds so fractional durations work
-      Start-Sleep -Milliseconds ([int]($dur * 1000))
-      $result.duration_s = $dur
-      $result.message = "Waited $dur second(s)"
+      $waitFor = ([string](Get-PayloadValue 'wait_for')).Trim().ToLowerInvariant()
+      if ($waitFor) {
+        if ($waitFor -notin @('accessibility_present', 'accessibility_available')) {
+          throw "wait_for must be accessibility_present or accessibility_available (got '$waitFor')"
+        }
+        $app = Get-PayloadValue 'app'
+        $hasHwnd = [int64](Get-PayloadValue 'hwnd') -gt 0
+        if (-not $app -and -not $hasHwnd) { throw 'wait_for accessibility requires app or window' }
+        # Poll the exact target's UIA tree without a screenshot or foreground
+        # activation. This handles packaged/WinUI startup races while keeping
+        # an absent provider explicit; it never manufactures an action snapshot.
+        $started = [Diagnostics.Stopwatch]::StartNew()
+        $ready = $false; $status = 'unavailable'; $count = 0
+        do {
+          $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
+          $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+          $count = $tree.Count
+          $status = if ($count -eq 0) { 'unavailable' } elseif ($count -le 2) { 'partial' } else { 'available' }
+          $ready = if ($waitFor -eq 'accessibility_present') { $status -ne 'unavailable' } else { $status -eq 'available' }
+          if ($ready -or $started.Elapsed.TotalSeconds -ge $dur) { break }
+          $remainingMs = [Math]::Max(0, [int]($dur * 1000 - $started.ElapsedMilliseconds))
+          if ($remainingMs -le 0) { break }
+          Start-Sleep -Milliseconds ([Math]::Min(250, $remainingMs))
+        } while ($true)
+        $result.wait_for = $waitFor; $result.ready = $ready
+        $result.accessibility_status = $status; $result.element_count = $count
+        $result.duration_s = [Math]::Round($started.Elapsed.TotalSeconds, 3)
+        if (-not $ready) {
+          $result.ok = $false; $result.outcome = 'not_executed'
+          $result.error_code = 'wait_condition_timeout'; $result.retry_safe = $true
+          $result.message = "Timed out waiting $($result.duration_s)s for $waitFor (last accessibility status: $status, $count element(s))"
+        } else {
+          $result.message = "Accessibility condition '$waitFor' satisfied after $($result.duration_s)s ($status, $count element(s))"
+        }
+      } else {
+        # Start-Sleep -Seconds is int-typed in PS 5.1 — use Milliseconds so fractional durations work
+        Start-Sleep -Milliseconds ([int]($dur * 1000))
+        $result.duration_s = $dur
+        $result.message = "Waited $dur second(s)"
+      }
     }
 
     'screenshot' {
@@ -3615,7 +3651,11 @@ finally {
     $result.needs_observation = -not [bool]$result.verified
   } elseif (-not $result.ok) {
     $result.outcome = 'unknown'
-    if ($result.message -match '^(snapshot_required|stale_snapshot|stale_screenshot|target_required|target_mismatch|ambiguous_window|app_not_found|window_not_found|element_not_found|background_unavailable|target_read_only):') {
+    if ($result.error_code -eq 'wait_condition_timeout') {
+      # This is an observed, bounded read-only condition failure, not an
+      # ambiguous transport or input outcome. Preserve its retry-safe meaning.
+      $result.outcome = 'not_executed'
+    } elseif ($result.message -match '^(snapshot_required|stale_snapshot|stale_screenshot|target_required|target_mismatch|ambiguous_window|app_not_found|window_not_found|element_not_found|background_unavailable|target_read_only):') {
       $result.error_code = $Matches[1]
       $result.outcome = 'not_executed'
     }

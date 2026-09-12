@@ -120,6 +120,12 @@ assert.ok(
   'Do-AppState must not tag any screenshot as bitblt_screen'
 )
 
+assert.match(
+  helperContent,
+  /\$result\.error_code -eq 'wait_condition_timeout'[\s\S]*?\$result\.outcome = 'not_executed'/,
+  'a bounded accessibility wait timeout must remain a retry-safe not_executed result, never degrade to unknown'
+)
+
 // 5c. Occlusion-immune background clicks: app-scoped clicks aim at the target window's
 // own tree, never at the screen-level (potentially occluding) topmost window
 assert.ok(
