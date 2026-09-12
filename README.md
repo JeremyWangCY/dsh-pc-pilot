@@ -84,7 +84,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `click` | Coordinate click or snapshot-bound `element_index` click |
 | `set_value` / `type_text` / `perform_secondary_action` / `select_text` | Element-level write, text entry, named UIA pattern, text-range selection |
 | `press_key` / `hold_key` | Key chords and timed holds |
-| `scroll` | Standard `scroll_x/scroll_y`, or legacy `amount` plus `direction` |
+| `scroll` | Standard `scroll_x/scroll_y` (including target-window horizontal UIA scrolling), or legacy `amount` plus `direction` |
 | `move` / `mouse_move` / `mouse_down` / `mouse_up` | Standard move plus raw mouse primitives |
 | `drag` | Standard `path` or legacy endpoints; element move (background) or real SendInput drag (foreground) |
 | `screenshot` / `zoom` | Full-display or region capture; crop the latest shot |

@@ -172,6 +172,11 @@ assert.ok(
   helperContent.includes("'uia_window_hit_'"),
   'app-scoped semantic hits must be tagged with the uia_window_hit_ method prefix'
 )
+assert.match(
+  helperContent,
+  /if \(\$horizontal\) \{[\s\S]{0,4000}?\$el = \(Find-TargetHitsAt -Hwnd \$win\.Hwnd -X \$sx -Y \$sy\)\.best[\s\S]{0,2000}?\$el\.TryGetCurrentPattern\(\[System\.Windows\.Automation\.ScrollPattern\]::Pattern/,
+  'app-scoped horizontal scroll must inspect the target window UIA tree before refusing a covered target'
+)
 assert.ok(
   helperContent.includes('function Find-TargetHitsAt'),
   'the shared single-scan hit-test Find-TargetHitsAt must exist (no duplicate full-tree scans)'

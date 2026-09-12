@@ -2650,17 +2650,20 @@ function Invoke-ActionRequest {
         $pt = New-Object System.Windows.Point($sx, $sy)
         if ($horizontal) {
           # horizontal scroll: ScrollPattern (horizontal axis) first, then WM_MOUSEHWHEEL
-          # (0x020E, wParam delta positive = scroll right); same hwnd fallback logic as vertical
+          # (0x020E, wParam delta positive = scroll right). With an app target,
+          # inspect that window's own tree first so an occluding foreground window
+          # can never make a spreadsheet/timeline appear unscrollable.
           $done = $false
           if ($win) {
-            # A covered target window must never fall through to FromPoint:
-            # that API sees the foreground occluder rather than this window.
-            $result.background_unavailable = $true
-            $result.message = 'scroll: target window has no verified horizontal ScrollPattern; refusing screen-hit fallback'
-            break
+            $el = (Find-TargetHitsAt -Hwnd $win.Hwnd -X $sx -Y $sy).best
+            if ($null -eq $el) {
+              try { $el = [System.Windows.Automation.AutomationElement]::FromHandle($win.Hwnd) } catch { $el = $null }
+            }
+          } else {
+            $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
           }
-          $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
           for ($i = 0; $i -lt 16 -and $null -ne $el; $i++) {
+            if ($win -and -not (Test-ElementInWindow -Element $el -Hwnd $win.Hwnd)) { break }
             $scp = $null
             if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
               $none = [System.Windows.Automation.ScrollAmount]::NoAmount
