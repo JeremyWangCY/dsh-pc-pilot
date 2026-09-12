@@ -3045,6 +3045,7 @@ function Invoke-ActionRequest {
 
       # Launch silently in background using -WindowStyle Minimized (direct at bottom, zero flicker/focus steal)
       $style = if (Get-PayloadValue 'activate' -or (Get-Dispatch) -eq 'foreground') { 'Normal' } else { 'Minimized' }
+      $launchDisposition = if ($style -eq 'Normal') { 'foreground' } else { 'background minimized' }
       # Start-Process supports registered Windows activation protocols such as
       # ms-settings:display.  They are not executable files, but treating them
       # as ordinary paths made Settings impossible to open through this action.
