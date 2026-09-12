@@ -9,7 +9,7 @@ assert.deepEqual(actionEnum.slice(0, 13), [
   'click', 'press_key', 'type_text', 'scroll', 'set_value', 'drag',
   'perform_secondary_action', 'activate_window',
 ])
-for (const removed of ['get_app_state', 'open_app', 'click_element', 'key', 'move', 'perform_action']) {
+for (const removed of ['get_app_state', 'open_app', 'click_element', 'key', 'perform_action']) {
   assert.ok(!actionEnum.includes(removed), `legacy action must not be model-callable: ${removed}`)
 }
 assert.equal(parameters.keys.type, 'array')
@@ -48,7 +48,10 @@ assert.deepEqual(normalizeComputerAction({ action: 'type', text: 'hello' }), {
 assert.deepEqual(normalizeComputerAction({ action: 'keypress', keys: ['CTRL', 'L'] }), {
   requestedAction: 'keypress', action: 'press_key', args: { action: 'press_key', keys: ['CTRL', 'L'], key: 'CTRL+L' },
 })
-for (const alias of ['double_click', 'type', 'keypress']) assert.ok(actionEnum.includes(alias), `OpenAI computer-use alias must be model-callable: ${alias}`)
+assert.deepEqual(normalizeComputerAction({ action: 'move', x: 7, y: 9 }), {
+  requestedAction: 'move', action: 'mouse_move', args: { action: 'mouse_move', x: 7, y: 9 },
+})
+for (const alias of ['double_click', 'type', 'keypress', 'move']) assert.ok(actionEnum.includes(alias), `OpenAI computer-use alias must be model-callable: ${alias}`)
 assert.deepEqual(normalizeComputerAction({ action: 'perform_secondary_action', secondary_action: 'expand' }), {
   requestedAction: 'perform_secondary_action', action: 'perform_secondary_action', args: { action: 'perform_secondary_action', secondary_action: 'expand' },
 })
