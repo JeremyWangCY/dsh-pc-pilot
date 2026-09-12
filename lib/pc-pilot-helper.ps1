@@ -1934,19 +1934,34 @@ function Do-AppState {
   $focusedElement = ''
   $selectedText = ''
   $selectedElements = @()
+  # Keep "no tree was requested" distinct from "the app exposed no usable UIA
+  # descendants".  Modern WinUI/UWP apps regularly have a valid HWND and WGC
+  # frame while their accessibility provider is still loading (or unavailable).
+  # A plain successful response with elements:[] encouraged callers to invent
+  # an element index and then fail later without a recovery direction.
+  $accessibilityStatus = 'not_requested'
   $script:cachedTreeHwnd = [IntPtr]::Zero
   $script:cachedElements = $null
   $script:cachedIdentities = $null
   if ($WithText) {
     $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-    # DESK-03: a freshly launched Win11 Notepad populates its UIA tree late and can
-    # expose only the root pane (2 elements) for a while. One short retry turns
-    # that into the full tree without a second model round-trip.
+    # DESK-03: a freshly launched Win11 Notepad (and several WinUI apps) can
+    # expose only a root pane or no descendants while the first frame settles.
+    # Make a bounded 2s stabilization pass in this exceptional case; a caller
+    # asking for indexed controls should get the ready tree when it appears,
+    # rather than burn another model turn on a known startup race.  We retain
+    # the largest tree seen, and still report partial/unavailable if it never
+    # becomes useful.
     if ($tree.Count -le 2) {
-      Start-Sleep -Milliseconds 250
-      $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-      if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+      for ($attempt = 0; $attempt -lt 8 -and $tree.Count -le 2; $attempt++) {
+        Start-Sleep -Milliseconds 250
+        $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+        if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+      }
     }
+    if ($tree.Count -eq 0) { $accessibilityStatus = 'unavailable' }
+    elseif ($tree.Count -le 2) { $accessibilityStatus = 'partial' }
+    else { $accessibilityStatus = 'available' }
     $docText = Get-DocumentText $win.Hwnd
     $focusedElement = Get-FocusedElementText $win.Hwnd
     $selectedText = Get-SelectedText $win.Hwnd
@@ -1969,11 +1984,15 @@ function Do-AppState {
     screenshot_id = if ($shot -and $shot.path) { $shot.id } else { $null }
     elements = $tree
     element_count = $tree.Count
+    accessibility_status = $accessibilityStatus
     document_text = if ($docText) { $docText } else { '' }
     focused_element = if ($focusedElement) { $focusedElement } else { '' }
     selected_text = if ($selectedText) { $selectedText } else { '' }
     selected_elements = $selectedElements
-    note = if ($WithText) { 'Element indexes are only valid together with this state; refresh after any UI change.' } else { 'Screenshot-only state: request include_text:true before using element_index.' }
+    note = if (-not $WithText) { 'Screenshot-only state: request include_text:true before using element_index.' }
+      elseif ($accessibilityStatus -eq 'unavailable') { 'No usable UI Automation descendants were exposed. Wait and re-observe, or use a screenshot-bound foreground coordinate path only when the task permits it; do not invent an element_index.' }
+      elseif ($accessibilityStatus -eq 'partial') { 'Only a partial UI Automation tree is available. Re-observe before relying on element indexes.' }
+      else { 'Element indexes are only valid together with this state; refresh after any UI change.' }
   }
 }
 
@@ -2283,6 +2302,7 @@ function Invoke-ActionRequest {
       $result.screenshot = $st.screenshot
       $result.elements = $st.elements
       $result.element_count = $st.element_count
+      $result.accessibility_status = $st.accessibility_status
       $result.document_text = $st.document_text
       $result.note = $st.note
       $result.accessibility = if ([bool]$withText) {
@@ -2294,7 +2314,7 @@ function Invoke-ActionRequest {
           if ($_.value) { $line += " = $($_.value)" }
           $line
         })
-        @{ tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text; selected_elements = $st.selected_elements }
+        @{ status = $st.accessibility_status; tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text; selected_elements = $st.selected_elements }
       } else { $null }
       $result.dispatch = (Get-Dispatch)
       $result.message = "State captured for '$app' ($($st.element_count) elements)"

@@ -52,6 +52,10 @@ try {
   assert.ok(Array.isArray(stateRes.elements) && stateRes.elements.length > 0,
     'scratch notepad must expose a non-empty element tree (get_app_state must have cached it)')
   assert.equal(typeof stateRes.accessibility?.tree, 'string', 'include_text:true must expose the native-style formatted accessibility tree')
+  assert.ok(['available', 'partial'].includes(stateRes.accessibility_status),
+    `a launched Win32 app must report its actual UIA readiness instead of an unqualified success: ${stateRes.accessibility_status}`)
+  assert.equal(stateRes.accessibility?.status, stateRes.accessibility_status,
+    'accessibility object must expose the same readiness status as the top-level response')
   assert.equal(typeof stateRes.accessibility?.focused_element, 'string', 'include_text:true must expose focused-element context when the provider can identify it')
   assert.equal(typeof stateRes.accessibility?.selected_text, 'string', 'include_text:true must expose selected-text context when the provider supports it')
   assert.ok(Array.isArray(stateRes.accessibility?.selected_elements), 'include_text:true must expose selected accessibility elements')

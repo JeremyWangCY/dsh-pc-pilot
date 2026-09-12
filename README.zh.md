@@ -33,6 +33,7 @@
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 标准动作词汇 | `double_click` / `move` / `scroll_x/scroll_y` / `drag.path` / `keypress.keys`，同时兼容三击和窗口级后台操作 |
 | O(1) 元素拾取 | `get_window_state` 在常驻 helper 守护进程内缓存 UIA 元素列表，`click { element_index }` / `set_value` / `perform_secondary_action` / `select_text` / `type_text` 直接 O(1) 命中，不再二次整树遍历 |
+| 真实应用就绪诊断 | 请求 `include_text: true` 时，`accessibility.status` / `accessibility_status` 区分 `available`、`partial` 与 `unavailable`；现代 WinUI/UWP 应用尚未暴露 UIA 树时，明确提示等待重观察或在授权时改走截图绑定的前台路径，绝不虚构元素索引 |
 | 遮挡免疫截图链 | 优先使用随包的 Windows Graphics Capture 按 HWND 抓取目标内容，失败时降级 `PrintWindow` 多旗标阶梯——两级都要求窗口自己渲染帧，遮挡物永远进不了截图；**刻意不提供屏幕 DC 降级**：两级都失败时返回可读的 `screenshot_black` 错误，而不是把遮挡窗口当作目标。没有 .NET 8 时仍可用 `PrintWindow` 路径 |
 | 按任务判断 dispatch | `foreground`（真实 SendInput）作为逃生舱口；工具指引要求模型保持 background 默认、切换时明确说明、不静默循环重试 |
 | 虚拟光标指示器 | `UpdateLayeredWindow` + `CreateDIBSection` 逐像素透明分层窗口：黑描边圆润白箭头 + 柔和蓝色径向光晕；`WS_EX_TRANSPARENT` 点击穿透、`WS_EX_NOACTIVATE` + `SW_SHOWNOACTIVATE` 永不抢焦点、置顶显示 |
