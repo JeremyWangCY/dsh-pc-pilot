@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build:wgc": "dotnet publish native/wgc-capture/wgc-capture.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o lib/wgc",
-    "test": "node scripts/build-helper.mjs --check && node test/split-text.check.mjs && node test/native-fixes.check.mjs && node test/ipc-payload.check.mjs && node test/round4-hardening.check.mjs && node test/features.check.mjs && node test/parity.check.mjs && node test/cua-actions.check.mjs && node test/batch-observation.check.mjs && node test/element-cache.check.mjs && node test/cursor-render.check.mjs && node test/codex-parity.check.mjs && node test/fix-validation.check.mjs && node test/delegated-launch.check.mjs && node test/close-window-verification.check.mjs && node test/oneshot-stdin.check.mjs && node test/snapshot-contract.check.mjs && node test/process-reliability.check.mjs && node test/background-target.check.mjs && node test/browser-session.check.mjs && node test/browser-statusbar.check.mjs && node test/headless-launch.check.mjs && node test/statusbar.check.mjs && node test/pc-pilot-skill.check.mjs && node test/latency.check.mjs",
+    "test": "node scripts/build-helper.mjs --check && node test/split-text.check.mjs && node test/native-fixes.check.mjs && node test/package-contents.check.mjs && node test/ipc-payload.check.mjs && node test/round4-hardening.check.mjs && node test/features.check.mjs && node test/parity.check.mjs && node test/cua-actions.check.mjs && node test/batch-observation.check.mjs && node test/element-cache.check.mjs && node test/cursor-render.check.mjs && node test/codex-parity.check.mjs && node test/fix-validation.check.mjs && node test/delegated-launch.check.mjs && node test/close-window-verification.check.mjs && node test/oneshot-stdin.check.mjs && node test/snapshot-contract.check.mjs && node test/process-reliability.check.mjs && node test/background-target.check.mjs && node test/browser-session.check.mjs && node test/browser-statusbar.check.mjs && node test/headless-launch.check.mjs && node test/statusbar.check.mjs && node test/pc-pilot-skill.check.mjs && node test/latency.check.mjs",
     "build:helper": "node scripts/build-helper.mjs",
     "check:helper": "node scripts/build-helper.mjs --check",
     "session": "node scripts/session.mjs"
@@ -49,7 +49,9 @@
     }
   },
   "files": [
-    "lib",
+    "lib/*.js",
+    "lib/*.ps1",
+    "lib/wgc/dsh-pc-pilot-wgc.exe",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
