@@ -41,6 +41,15 @@ try {
   assert.deepEqual(screenshotOnly.screenshots, [], 'a state without a capture must retain the canonical empty screenshots array')
   assert.deepEqual(screenshotOnly.elements, [], 'include_text:false must not build element indexes')
 
+  const waited = await tool.execute({
+    action: 'wait', duration_s: 0.01, app: String(notepadPid), include_text: true,
+  })
+  assert.equal(waited.ok, true, `window-targeted wait must succeed: ${JSON.stringify(waited)}`)
+  assert.ok(['available', 'partial'].includes(waited.post_action_observation?.accessibility_status),
+    `wait must return a ready-state diagnosis when include_text is requested: ${JSON.stringify(waited.post_action_observation)}`)
+  assert.equal(waited.post_action_observation?.accessibility?.status, waited.post_action_observation?.accessibility_status,
+    'post-wait accessibility object must preserve the same readiness status')
+
   const stateRes = await tool.execute({
     action: 'get_window_state',
     app: String(notepadPid),

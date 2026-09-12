@@ -101,7 +101,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `dispatch` | `background` | UIA patterns + window messages; never steals focus. `foreground` uses real SendInput — pick it per task only when the user asked for real control or the essential action has no background path. |
 | `overlay` | `true` | Show the click-through cursor at each action point; it auto-hides 3 s after the last action. |
 | `include_screenshot` | `true` | Capture a per-window PNG in `get_window_state`. |
-| `include_text` | `false` | Include the indexed accessibility tree and document text when an element action is needed. |
+| `include_text` | `false` | Include the indexed accessibility tree and document text when an element action is needed. On a window-targeted `wait`, include it in the post-wait observation to check application readiness without a second round-trip. |
 | `app` | — | pid number, process name, or window-title substring; same-titled duplicate windows are rejected unless `window_index` or `hwnd` identifies one, while differently titled windows of one app auto-resolve and return `chosen_hwnd`. |
 | `snapshot_id` | — | Required for desktop element actions; use the id from the latest `get_window_state { include_text: true }`. |
 | `browser_endpoint` / `tab_id` / `browser_element` | — | Explicit loopback DevTools endpoint, exact tab id, and token from the latest `browser_state`. |
