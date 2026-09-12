@@ -2494,7 +2494,17 @@ function Invoke-ActionRequest {
         # read back so outcome becomes 'verified' instead of an unproven 'dispatched'
         $result.verified = ([string]$vp.Current.Value -ceq [string]$value)
         $result.method = 'value_pattern'
-        $result.message = "Set element $element value" + $(if ($result.verified) { ' and read it back' } else { ' (readback mismatch; verify with get_app_state)' })
+        if ($result.verified) {
+          $result.message = "Set element $element value and read it back"
+        } else {
+          # A control may reject or normalize SetValue. The mutation was
+          # attempted, but its final value is not the requested value, so it is
+          # unsafe to report a completed write or invite an automatic retry.
+          $result.ok = $false
+          $result.error_code = 'value_verification_failed'
+          $result.needs_observation = $true
+          $result.message = "Set element $element value, but readback differed; inspect current state before deciding what to do next"
+        }
       } elseif ($dispatch -eq 'background') {
         $result.background_unavailable = $true
         $result.message = "Element $element has no ValuePattern; background set_value unavailable. Use dispatch=foreground (focus_type) or type instead."

@@ -262,6 +262,11 @@ assert.match(
   /function\s+Find-ValuePatternEl.*?\[System\.Windows\.Automation\.AutomationElement\]::FocusedElement/s,
   'Find-ValuePatternEl must check FocusedElement first'
 )
+assert.match(
+  helperContent,
+  /\$result\.verified = \(\[string\]\$vp\.Current\.Value -ceq \[string\]\$value\)[\s\S]*?if \(\$result\.verified\)[\s\S]*?\$result\.ok = \$false[\s\S]*?\$result\.error_code = 'value_verification_failed'[\s\S]*?\$result\.needs_observation = \$true/s,
+  'set_value readback mismatch must be an unknown verification failure, never a dispatched success'
+)
 const typeAction = helperContent.match(/'type_text'\s*\{([\s\S]*?)\n\s*'press_key'\s*\{/)
 assert.ok(typeAction, 'helper must contain a type_text action')
 assert.doesNotMatch(
