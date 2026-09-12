@@ -13,6 +13,9 @@ let endpoint
 let launchedPid = 0
 const started = performance.now()
 try {
+  const rejected = await tool.execute({ action: 'browser_shutdown', browser_endpoint: 'ws://127.0.0.1:9222/devtools/browser/not-owned' })
+  assert.equal(rejected.ok, false, JSON.stringify(rejected))
+  assert.equal(rejected.error_code, 'browser_not_owned', JSON.stringify(rejected))
   const launched = await tool.execute({ action: 'launch_app', name: `"${edge}" --user-data-dir="${profile}"`, headless: true, overlay: false })
   launchedPid = Number.isSafeInteger(launched.pid) ? launched.pid : 0
   assert.equal(launched.ok, true, JSON.stringify(launched))
@@ -25,6 +28,10 @@ try {
   const state = await tool.execute({ action: 'browser_state', browser_endpoint: endpoint })
   assert.equal(state.ok, true, JSON.stringify(state))
   assert.ok(state.pages.length)
+  const shutdown = await tool.execute({ action: 'browser_shutdown', browser_endpoint: endpoint })
+  assert.equal(shutdown.ok, true, JSON.stringify(shutdown))
+  assert.equal(shutdown.browser_closed, true, JSON.stringify(shutdown))
+  endpoint = undefined
   console.log(`PASS headless helper launch: no desktop window; CDP reachable; elapsed=${Math.round(performance.now() - started)}ms`)
 } finally {
   if (endpoint) {
