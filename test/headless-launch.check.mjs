@@ -3,15 +3,18 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { once } from 'node:events'
+import { execFileSync } from 'node:child_process'
 import { defineComputerTool, stopDaemon } from '../lib/index.js'
 
 const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-pilot-launch-'))
 const edge = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
 const tool = defineComputerTool(v => v, {})
 let endpoint
+let launchedPid = 0
 const started = performance.now()
 try {
   const launched = await tool.execute({ action: 'launch_app', name: `"${edge}" --user-data-dir="${profile}"`, headless: true, overlay: false })
+  launchedPid = Number.isSafeInteger(launched.pid) ? launched.pid : 0
   assert.equal(launched.ok, true, JSON.stringify(launched))
   assert.equal(launched.headless, true)
   endpoint = launched.browser_endpoint
@@ -25,11 +28,18 @@ try {
   console.log(`PASS headless helper launch: no desktop window; CDP reachable; elapsed=${Math.round(performance.now() - started)}ms`)
 } finally {
   if (endpoint) {
-    const socket = new WebSocket(endpoint)
-    await once(socket, 'open')
-    socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
-    await Promise.race([once(socket, 'close'), new Promise(resolve => setTimeout(resolve, 2000))])
-    socket.close()
+    try {
+      const socket = new WebSocket(endpoint)
+      await once(socket, 'open')
+      socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }))
+      await Promise.race([once(socket, 'close'), new Promise(resolve => setTimeout(resolve, 2000))])
+      socket.close()
+    } catch { /* PID cleanup below is the fallback */ }
+  }
+  if (launchedPid > 0) {
+    try {
+      execFileSync('taskkill', ['/PID', String(launchedPid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    } catch { /* Browser.close already ended the test process tree */ }
   }
   stopDaemon()
   const resolved = path.resolve(profile)

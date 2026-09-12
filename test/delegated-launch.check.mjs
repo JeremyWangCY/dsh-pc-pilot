@@ -7,7 +7,7 @@ import { defineComputerTool, stopDaemon } from '../lib/index.js'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const launcher = path.join(root, 'test', 'fixtures', 'delegated-native-window.cmd')
 const tool = defineComputerTool(value => value, {})
-let hwnd = 0
+let fixtureHwnd = 0
 
 try {
   const launched = await tool.execute({
@@ -16,13 +16,13 @@ try {
   })
   assert.equal(launched.ok, true, JSON.stringify(launched))
   assert.ok(Number.isInteger(launched.hwnd) && launched.hwnd > 0, `delegated launch must return an HWND: ${JSON.stringify(launched)}`)
-  hwnd = launched.hwnd
-  const observed = await tool.execute({ action: 'get_window', hwnd })
+  const observed = await tool.execute({ action: 'get_window', hwnd: launched.hwnd })
   assert.equal(observed.ok, true, JSON.stringify(observed))
   assert.equal(observed.window.title, 'PC-Pilot native test fixture', JSON.stringify(observed))
+  fixtureHwnd = observed.hwnd
 } finally {
-  if (hwnd) {
-    try { await tool.execute({ action: 'close_window', hwnd }) } catch { /* best effort cleanup */ }
+  if (fixtureHwnd) {
+    try { await tool.execute({ action: 'close_window', hwnd: fixtureHwnd }) } catch { /* best effort cleanup */ }
   }
   try { execFileSync('taskkill', ['/FI', 'WINDOWTITLE eq PC-Pilot native test fixture', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* no fixture remains */ }
   stopDaemon()
