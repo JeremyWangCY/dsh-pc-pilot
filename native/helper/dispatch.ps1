@@ -1027,7 +1027,10 @@ function Invoke-ActionRequest {
       # Start-Process supports registered Windows activation protocols such as
       # ms-settings:display.  They are not executable files, but treating them
       # as ordinary paths made Settings impossible to open through this action.
-      $isActivationProtocol = $filePath -match '^[A-Za-z][A-Za-z0-9+.-]*:'
+      # A Windows drive path begins with the same "C:" shape as a URI scheme.
+      # Treat it as a protocol only when the colon is not followed by a slash,
+      # so quoted browser executables launch directly instead of through Explorer.
+      $isActivationProtocol = $filePath -match '^[A-Za-z][A-Za-z0-9+.-]*:(?![\\/])'
       $proc = if ($isActivationProtocol) {
         # Passing WindowStyle directly to a URI activation is rejected by some
         # Windows builds. Explorer is the documented shell router for these
@@ -1044,7 +1047,12 @@ function Invoke-ActionRequest {
       if ($debugProfileDir) {
         $activePort = Join-Path $debugProfileDir 'DevToolsActivePort'
         $browserReady = $false
-        for ($attempt = 0; $attempt -lt 100 -and -not $browserReady; $attempt++) {
+        # A fresh Edge profile can take materially longer than the old 5s probe
+        # budget to initialize its DevTools listener. Keep this bounded below the
+        # helper's 20s launch deadline, rather than declaring a live browser
+        # unknown and inviting the caller to create another one.
+        $browserReadyDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        while (-not $browserReady -and [DateTime]::UtcNow -lt $browserReadyDeadline) {
           Start-Sleep -Milliseconds 50
           try {
             $lines = @(Get-Content -LiteralPath $activePort -ErrorAction Stop)

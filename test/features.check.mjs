@@ -25,10 +25,10 @@ for (const act of expectedActions) {
 // button property schema
 assert.ok(params.button, 'button parameter must be present')
 assert.equal(params.button.type, 'string')
-assert.deepEqual(params.button.enum, ['left', 'right', 'middle'])
+assert.deepEqual(params.button.enum, ['left', 'right', 'middle', 'wheel', 'back', 'forward'])
 assert.equal(
   params.button.description,
-  'Mouse button for click and mouse_down/mouse_up (default left).'
+  'Mouse button for click and mouse_down/mouse_up (default left). wheel is the OpenAI name for the middle button; back and forward are the physical extended buttons.'
 )
 
 // duration_ms property schema

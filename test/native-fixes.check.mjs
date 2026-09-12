@@ -168,6 +168,16 @@ assert.match(
   /public static void MouseClickEx[\s\S]*?b == "back"[\s\S]*?downF = 0x0080[\s\S]*?mouseData = 0x0001[\s\S]*?b == "forward"[\s\S]*?mouseData = 0x0002/,
   'foreground clicks must encode XBUTTON back/forward SendInput data'
 )
+assert.match(
+  helperContent,
+  /\$browserReadyDeadline = \[DateTime\]::UtcNow\.AddSeconds\(15\)[\s\S]*?while \(-not \$browserReady -and \[DateTime\]::UtcNow -lt \$browserReadyDeadline\)/,
+  'headless Chromium launch must use a bounded 15-second DevTools readiness budget'
+)
+assert.match(
+  helperContent,
+  /\$isActivationProtocol = \$filePath -match '\^\[A-Za-z\]\[A-Za-z0-9\+\.\-\]\*:\(\?!\[\\\\\/\]\)'/,
+  'Windows drive-letter executables must not be mistaken for activation protocols'
+)
 assert.ok(
   helperContent.includes("'uia_window_hit_'"),
   'app-scoped semantic hits must be tagged with the uia_window_hit_ method prefix'
