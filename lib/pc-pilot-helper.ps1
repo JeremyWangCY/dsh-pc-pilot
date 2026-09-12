@@ -3238,7 +3238,8 @@ function Invoke-ActionRequest {
             $result.ok = $false
             $result.error_code = 'foreground_activation_unconfirmed'
             $result.needs_observation = $true
-            $result.message += '; foreground activation could not be confirmed'
+            $result.launch_succeeded = $true
+            $result.message += '; foreground activation could not be confirmed, but the app launch completed—do not retry launch; observe the returned window'
           }
         }
       }

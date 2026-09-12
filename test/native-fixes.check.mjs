@@ -147,6 +147,11 @@ assert.match(
   /foreground_activation_unconfirmed\):'[\s\S]*?\$result\.outcome = 'not_executed'/,
   'unconfirmed foreground activation must be reported as not_executed, not an ambiguous input result'
 )
+assert.match(
+  helperContent,
+  /\$result\.error_code = 'foreground_activation_unconfirmed'[\s\S]*?\$result\.launch_succeeded = \$true[\s\S]*?do not retry launch/s,
+  'a launched app with unconfirmed foreground focus must preserve its identity and explicitly prevent a duplicate launch retry'
+)
 
 // 5c. Occlusion-immune background clicks: app-scoped clicks aim at the target window's
 // own tree, never at the screen-level (potentially occluding) topmost window
