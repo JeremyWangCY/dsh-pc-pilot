@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -206,9 +206,8 @@ try {
     try { await command('Browser.close') } catch { /* child fallback below */ }
     control.close()
   }
-  if (child && child.exitCode === null) {
-    await Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 2000))])
-    if (child.exitCode === null) child.kill()
+  if (child?.pid) {
+    try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* Browser.close already ended the owned profile tree */ }
   }
   await new Promise(resolve => server.close(resolve))
   await rm(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })

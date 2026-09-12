@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { defineComputerTool, stopDaemon } from '../lib/index.js'
 
 // 1. Static assertions: Find-ElementByIndex must prioritize $script:cachedElements cache
@@ -24,8 +24,8 @@ const tool = defineComputerTool((def) => def)
 let notepadPid = 0
 try {
   const openRes = await tool.execute({ action: 'launch_app', name: 'notepad' })
+  notepadPid = Number.isSafeInteger(openRes.pid) ? openRes.pid : 0
   assert.equal(openRes.ok, true, `open_app notepad should succeed: ${JSON.stringify(openRes)}`)
-  notepadPid = openRes.pid
   assert.ok(Number.isInteger(notepadPid) && notepadPid > 0, 'scratch notepad must be spawned for the dynamic cache test')
 
   const screenshotOnly = await tool.execute({
@@ -92,7 +92,7 @@ try {
   assert.ok(durationMs < 600, `cached element-index refusal took ${Math.round(durationMs)}ms; expected no full-tree rescan`)
 } finally {
   // cleanup scratch notepad regardless of outcome
-  if (notepadPid > 0) { try { execSync(`taskkill /PID ${notepadPid} /F`, { timeout: 10000, windowsHide: true }) } catch { /* already gone */ } }
+  if (notepadPid > 0) { try { execFileSync('taskkill', ['/PID', String(notepadPid), '/T', '/F'], { timeout: 10000, windowsHide: true, stdio: 'ignore' }) } catch { /* already gone */ } }
   stopDaemon()
 }
 

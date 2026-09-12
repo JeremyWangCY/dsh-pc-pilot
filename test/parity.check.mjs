@@ -125,48 +125,33 @@ assert.ok(
   `zoom failure must name the missing crop size: ${JSON.stringify(zoomNoSizeRes.message)}`
 )
 
-// get_window_state smoke on a real window: the occlusion-immune capture chain (WGC
-// bridge, then the PrintWindow ladder) must produce a usable PNG.
-// Tool/tray windows can expose empty UIA trees, and DirectComposition/UWP
-// surfaces legitimately report screenshot_black — so pick a candidate that
-// yields both a non-empty element tree and a captured frame.
-const stateCandidates = [...listWinRes.windows]
-  .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height))
-  .slice(0, 4)
+// get_window_state smoke must use an owned fixture.  The test runner must not
+// capture or inspect a user's existing application merely to find a convenient
+// window with a non-empty accessibility tree.
 let stateRes = null
-for (const cand of stateCandidates) {
-  const res = await tool.execute({ action: 'get_window_state', app: String(cand.pid), hwnd: cand.hwnd, screenshot: true, include_text: true })
-  if (res.ok && Array.isArray(res.elements) && res.elements.length > 0 &&
-      res.screenshot && typeof res.screenshot.path === 'string' && res.screenshot.path.length > 0) { stateRes = res; break }
-}
-// The user's current desktop may contain only protected, canvas, or minimized
-// surfaces. Keep this test meaningful in that environment by falling back to
-// an owned native window rather than accepting a weaker screenshot assertion.
-if (!stateRes) {
-  let fixturePid = 0
-  try {
-    const fixturePath = path.join(__dirname, 'fixtures', 'native-window.ps1')
-    const launched = await tool.execute({ action: 'launch_app', name: `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${fixturePath}"` })
-    fixturePid = launched.pid
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const windows = await tool.execute({ action: 'list_windows', app: String(fixturePid) })
-      const fixture = windows.windows?.find((window) => window.title === 'PC-Pilot native test fixture')
-      if (fixture) {
-        const candidate = await tool.execute({ action: 'get_window_state', app: String(fixturePid), hwnd: fixture.hwnd, screenshot: true, include_text: true, dispatch: 'foreground' })
-        if (candidate.ok && candidate.elements?.length > 0 && candidate.screenshot?.path) {
-          stateRes = candidate
-          break
-        }
+let fixturePid = 0
+try {
+  const fixturePath = path.join(__dirname, 'fixtures', 'native-window.ps1')
+  const launched = await tool.execute({ action: 'launch_app', name: `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${fixturePath}"` })
+  fixturePid = Number.isSafeInteger(launched.pid) ? launched.pid : 0
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const windows = await tool.execute({ action: 'list_windows', app: String(fixturePid) })
+    const fixture = windows.windows?.find((window) => window.title === 'PC-Pilot native test fixture')
+    if (fixture) {
+      const candidate = await tool.execute({ action: 'get_window_state', app: String(fixturePid), hwnd: fixture.hwnd, screenshot: true, include_text: true, dispatch: 'foreground' })
+      if (candidate.ok && candidate.elements?.length > 0 && candidate.screenshot?.path) {
+        stateRes = candidate
+        break
       }
-      await new Promise((resolve) => setTimeout(resolve, 50))
     }
-  } finally {
-    if (fixturePid > 0) {
-      try { execFileSync('taskkill', ['/PID', String(fixturePid), '/F'], { windowsHide: true, timeout: 10000 }) } catch { /* fixture already exited */ }
-    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+} finally {
+  if (fixturePid > 0) {
+    try { execFileSync('taskkill', ['/PID', String(fixturePid), '/T', '/F'], { windowsHide: true, timeout: 10000, stdio: 'ignore' }) } catch { /* fixture already exited */ }
   }
 }
-assert.ok(stateRes, `get_window_state must yield a non-empty element tree with a captured screenshot for one of ${stateCandidates.length} candidate windows`)
+assert.ok(stateRes, 'get_window_state must yield a non-empty element tree with a captured screenshot for the owned native fixture')
 assert.ok(stateRes.screenshot, 'get_window_state must return a screenshot object')
 assert.ok(typeof stateRes.screenshot.path === 'string' && stateRes.screenshot.path.length > 0,
   `screenshot must have a path: ${JSON.stringify(stateRes.screenshot)}`)
@@ -176,7 +161,13 @@ assert.ok(
   `screenshot method must be windows_graphics_capture or print_window, got ${stateRes.screenshot.method}`
 )
 
-// Clean up daemon before exit
+// The capture outputs exist only to verify this test.  Delete the exact paths
+// returned by the helper so regression runs do not retain desktop snapshots.
+for (const capturePath of new Set([shotRes.path, zoomRes.path, stateRes.screenshot.path])) {
+  try { fs.unlinkSync(capturePath) } catch { /* already removed by the helper */ }
+}
+
+// Clean up daemon before exit.
 stopDaemon()
 
 console.log('parity check PASSED')

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { defineComputerTool, stopDaemon } from '../lib/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -77,8 +77,8 @@ let notepadHwnd = 0
 try {
   // 2a. Test silent open_app: verify it returns real pid and hwnd, and does NOT steal foreground
   const openRes = await tool.execute({ action: 'launch_app', name: 'notepad' })
+  notepadPid = Number.isSafeInteger(openRes.pid) ? openRes.pid : 0
   assert.equal(openRes.ok, true, `open_app notepad failed: ${JSON.stringify(openRes)}`)
-  notepadPid = openRes.pid
   notepadHwnd = openRes.hwnd
   assert.ok(Number.isInteger(notepadPid) && notepadPid > 0, 'open_app must return valid pid')
   assert.ok(Number.isInteger(notepadHwnd) && notepadHwnd > 0, 'open_app must return valid hwnd')
@@ -101,7 +101,7 @@ try {
 
 } finally {
   if (notepadPid > 0) {
-    try { execSync(`taskkill /PID ${notepadPid} /F 2>nul || exit 0`, { timeout: 10000, windowsHide: true }) } catch { /* ignore */ }
+    try { execFileSync('taskkill', ['/PID', String(notepadPid), '/T', '/F'], { timeout: 10000, windowsHide: true, stdio: 'ignore' }) } catch { /* ignore */ }
   }
   stopDaemon()
 }

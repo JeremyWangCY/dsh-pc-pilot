@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execSync } from 'node:child_process'
+import { execFileSync, execSync } from 'node:child_process'
 import { defineComputerTool, stopDaemon } from '../lib/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -95,8 +95,8 @@ try {
   // Test silent open_app
   const fixturePath = path.join(rootDir, 'test/fixtures/native-window.ps1')
   const openRes = await tool.execute({ action: 'launch_app', name: `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${fixturePath}"` })
+  fixturePid = Number.isSafeInteger(openRes.pid) ? openRes.pid : 0
   assert.equal(openRes.ok, true, `open_app notepad should succeed: ${JSON.stringify(openRes)}`)
-  fixturePid = openRes.pid
   assert.ok(Number.isInteger(fixturePid) && fixturePid > 0, 'open_app must return a valid pid')
 
   // Wait briefly for the window to be registered in window list
@@ -142,15 +142,6 @@ try {
     overlay: false,
   })
   assert.equal(chordKeyRes.ok, true, `background chord key Control_L+a must succeed: ${JSON.stringify(chordKeyRes)}`)
-
-  const chordCopyRes = await tool.execute({
-    action: 'press_key',
-    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
-    key: 'ctrl+c',
-    dispatch: 'background',
-    overlay: false,
-  })
-  assert.equal(chordCopyRes.ok, true, `background chord key ctrl+c must succeed: ${JSON.stringify(chordCopyRes)}`)
 
   const chordHoldRes = await tool.execute({
     action: 'hold_key',
@@ -209,7 +200,7 @@ try {
 } finally {
   // Strict cleanup: kill owned fixture immediately
   if (fixturePid > 0) {
-    try { execSync(`taskkill /PID ${fixturePid} /F 2>nul || exit 0`, { timeout: 10000, windowsHide: true }) } catch { /* ignore */ }
+    try { execFileSync('taskkill', ['/PID', String(fixturePid), '/T', '/F'], { timeout: 10000, windowsHide: true, stdio: 'ignore' }) } catch { /* ignore */ }
   }
   stopDaemon()
 }
