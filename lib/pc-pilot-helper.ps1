@@ -2062,6 +2062,20 @@ function Split-AppCommand {
   return @($filePath, $argList)
 }
 
+function Assert-ForegroundTarget {
+  param($Win)
+  [DshWin32]::ForceForeground($Win.Hwnd)
+  Start-Sleep -Milliseconds 150
+  $foreground = [DshWin32]::GetForegroundWindow()
+  $focused = ($foreground -eq $Win.Hwnd -or [DshWin32]::IsChild($Win.Hwnd, $foreground))
+  if (-not $focused) {
+    # SendInput has no HWND target. Continuing after a failed activation would
+    # deliver real input to whichever app the user is actually using.
+    throw "foreground_activation_unconfirmed: target hwnd $($Win.Hwnd.ToInt64()) did not become foreground; no real input was sent"
+  }
+  return $true
+}
+
 function Get-ClipboardTextSafe {
   if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -eq [System.Threading.ApartmentState]::STA) {
     for ($i = 0; $i -lt 10; $i++) {
@@ -2182,9 +2196,7 @@ function Invoke-MouseButtonAction {
   if ($app) {
     $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
     if ($dispatch -eq 'foreground') {
-      [DshWin32]::ForceForeground($win.Hwnd)
-      Start-Sleep -Milliseconds 150
-      $Result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+      $Result.focus_ok = Assert-ForegroundTarget -Win $win
     }
   }
 
@@ -2363,9 +2375,8 @@ function Invoke-ActionRequest {
       $win = $null
       if ($app) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
-        if ($dispatch -eq 'foreground') { [DshWin32]::ForceForeground($win.Hwnd) }
+        if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
-        if ($dispatch -eq 'foreground') { $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64()) }
       }
       Assert-ScreenshotBinding -Hwnd $(if ($win) { $win.Hwnd } else { [IntPtr]::Zero })
       $el = $null
@@ -2477,9 +2488,7 @@ function Invoke-ActionRequest {
       $dispatch = Get-Dispatch
       $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
       if ($dispatch -eq 'foreground') {
-        [DshWin32]::ForceForeground($win.Hwnd)
-        Start-Sleep -Milliseconds 150
-        $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+        $result.focus_ok = Assert-ForegroundTarget -Win $win
       }
       $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
       Assert-ConsequenceConfirmation -Element $el
@@ -2527,9 +2536,7 @@ function Invoke-ActionRequest {
       if ($app) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
-          [DshWin32]::ForceForeground($win.Hwnd)
-          Start-Sleep -Milliseconds 150
-          $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+          $result.focus_ok = Assert-ForegroundTarget -Win $win
         }
         $pt = Get-OverlayPoint-WindowCenter $win
         $cx = $pt[0]; $cy = $pt[1]
@@ -2604,9 +2611,7 @@ function Invoke-ActionRequest {
       if ($app) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
-          [DshWin32]::ForceForeground($win.Hwnd)
-          Start-Sleep -Milliseconds 150
-          $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+          $result.focus_ok = Assert-ForegroundTarget -Win $win
         }
       }
       if ($dispatch -eq 'background' -and $null -ne $win) {
@@ -2648,7 +2653,7 @@ function Invoke-ActionRequest {
       $win = $null
       if ($app) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
-        if ($dispatch -eq 'foreground') { [DshWin32]::ForceForeground($win.Hwnd) }
+        if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
         $sx = $r.Left + $x; $sy = $r.Top + $y
       } else {
@@ -2815,7 +2820,7 @@ function Invoke-ActionRequest {
       $win = $null
       if ($app) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
-        if ($dispatch -eq 'foreground') { [DshWin32]::ForceForeground($win.Hwnd) }
+        if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
       }
       Assert-ScreenshotBinding -Hwnd $(if ($win) { $win.Hwnd } else { [IntPtr]::Zero })
@@ -2935,9 +2940,7 @@ function Invoke-ActionRequest {
       if ($app) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
-          [DshWin32]::ForceForeground($win.Hwnd)
-          Start-Sleep -Milliseconds 150
-          $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+          $result.focus_ok = Assert-ForegroundTarget -Win $win
         }
       }
       if ($dispatch -eq 'background' -and $null -ne $win) {
@@ -3233,7 +3236,7 @@ function Invoke-ActionRequest {
           $result.activated = [bool]($fgHwnd -eq $resolvedWindow.Hwnd -or [DshWin32]::IsChild($resolvedWindow.Hwnd, $fgHwnd))
           if (-not $result.activated) {
             $result.ok = $false
-            $result.error_code = 'window_activation_unconfirmed'
+            $result.error_code = 'foreground_activation_unconfirmed'
             $result.needs_observation = $true
             $result.message += '; foreground activation could not be confirmed'
           }
@@ -3285,9 +3288,7 @@ function Invoke-ActionRequest {
       $hwndVal = Get-PayloadValue 'hwnd'
       $hwnd = if ($hwndVal) { [int64]$hwndVal } else { 0 }
       $win = Resolve-TargetWindow -App $app -Index $idx -Hwnd $hwnd
-      [DshWin32]::ForceForeground($win.Hwnd)
-      $fgHwnd = [DshWin32]::GetForegroundWindow()
-      $activated = ($fgHwnd -eq $win.Hwnd -or [DshWin32]::IsChild($win.Hwnd, $fgHwnd))
+      $activated = Assert-ForegroundTarget -Win $win
       $result.hwnd = $win.Hwnd.ToInt64()
       $result.title = $win.Title
       $result.activated = [bool]$activated
@@ -3550,9 +3551,7 @@ function Invoke-ActionRequest {
       $dispatch = Get-Dispatch
       $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
       if ($dispatch -eq 'foreground') {
-        [DshWin32]::ForceForeground($win.Hwnd)
-        Start-Sleep -Milliseconds 150
-        $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+        $result.focus_ok = Assert-ForegroundTarget -Win $win
       }
       $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
       Assert-ConsequenceConfirmation -Element $el
@@ -3653,9 +3652,7 @@ function Invoke-ActionRequest {
       $dispatch = Get-Dispatch
       $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
       if ($dispatch -eq 'foreground') {
-        [DshWin32]::ForceForeground($win.Hwnd)
-        Start-Sleep -Milliseconds 150
-        $result.focus_ok = ([DshWin32]::ForegroundHwnd() -eq $win.Hwnd.ToInt64())
+        $result.focus_ok = Assert-ForegroundTarget -Win $win
       }
       $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
       $tp = $null
@@ -3746,7 +3743,7 @@ finally {
       # This is an observed, bounded read-only condition failure, not an
       # ambiguous transport or input outcome. Preserve its retry-safe meaning.
       $result.outcome = 'not_executed'
-    } elseif ($result.message -match '^(snapshot_required|stale_snapshot|stale_screenshot|target_required|target_mismatch|ambiguous_window|app_not_found|window_not_found|element_not_found|background_unavailable|target_read_only):') {
+    } elseif ($result.message -match '^(snapshot_required|stale_snapshot|stale_screenshot|target_required|target_mismatch|ambiguous_window|app_not_found|window_not_found|element_not_found|background_unavailable|target_read_only|foreground_activation_unconfirmed):') {
       $result.error_code = $Matches[1]
       $result.outcome = 'not_executed'
     }

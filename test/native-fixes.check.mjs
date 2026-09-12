@@ -125,6 +125,28 @@ assert.match(
   /\$result\.error_code -eq 'wait_condition_timeout'[\s\S]*?\$result\.outcome = 'not_executed'/,
   'a bounded accessibility wait timeout must remain a retry-safe not_executed result, never degrade to unknown'
 )
+assert.match(
+  helperContent,
+  /function Assert-ForegroundTarget[\s\S]*?ForceForeground\(\$Win\.Hwnd\)[\s\S]*?foreground_activation_unconfirmed:[\s\S]*?no real input was sent/s,
+  'foreground input must verify target focus and refuse SendInput when activation fails'
+)
+const inputDispatchStart = helperContent.indexOf('function Invoke-MouseButtonAction')
+assert.ok(inputDispatchStart >= 0, 'helper must contain desktop input dispatch')
+assert.doesNotMatch(
+  helperContent.slice(inputDispatchStart),
+  /ForceForeground\(\$win\.Hwnd\)/,
+  'desktop action branches must use the verified foreground guard instead of sending input after an unchecked focus attempt'
+)
+assert.match(
+  helperContent,
+  /\$activated = Assert-ForegroundTarget -Win \$win/,
+  'activate_window must fail closed when Windows does not grant foreground control'
+)
+assert.match(
+  helperContent,
+  /foreground_activation_unconfirmed\):'[\s\S]*?\$result\.outcome = 'not_executed'/,
+  'unconfirmed foreground activation must be reported as not_executed, not an ambiguous input result'
+)
 
 // 5c. Occlusion-immune background clicks: app-scoped clicks aim at the target window's
 // own tree, never at the screen-level (potentially occluding) topmost window
