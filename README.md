@@ -75,7 +75,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 3. Act on the state — element actions include the `snapshot_id` from the same observation. Browser actions use `browser_state` first, then a tab id and `browser_element` token.
 4. Refresh the state after every UI change; element indexes are only valid for the `get_window_state` that produced them.
 
-### Action reference (35 actions)
+### Action reference (46 actions)
 
 | Action | Purpose |
 | --- | --- |

@@ -110,14 +110,14 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 // 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_window_state 有效）
 ```
 
-### 动作参考（41 个动作）
+### 动作参考（46 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
 | `list_apps` / `list_windows` / `list_displays` | 列出运行中的应用 / 单应用多窗口 / 显示器拓扑 | 无 / `app`? / 无 |
 | `get_window_state` | 默认截图优先；`include_text: true` 时构建索引化无障碍树并附带 `document_text` | `window`、`include_screenshot`、`include_text` |
 | `click` | 标准坐标、左/右/中键、`wheel`（中键）、扩展 `back` / `forward` 键与多击，或绑定快照的 UIA 元素点击 | `window`、`x`、`y`、`mouse_button`、`click_count`；元素动作还需 `element_index`、`snapshot_id` |
-| `set_value` | 直接替换元素文本值（UIA ValuePattern） | `window`、`element_index`、`snapshot_id`、`value` |
+| `set_value` | 直接替换元素文本值（UIA ValuePattern）；读回值不一致时返回 `value_verification_failed`，要求重新观察 | `window`、`element_index`、`snapshot_id`、`value` |
 | `type_text` | 向已验证焦点输入文本 | `window`、`text` |
 | `perform_secondary_action` | 对元素执行命名 UIA 动作（invoke / toggle / select / expand / collapse / focus / scroll_*） | `window`、`element_index`、`snapshot_id`、`secondary_action` |
 | `select_text` | 选中元素文本范围（TextPattern）；`length: 0` 仅定位光标 | `app`、`element`、`start`、`length` |
@@ -127,10 +127,10 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `drag` | 标准有序路径，或旧式端点；前台真实 SendInput 逐段拖动，后台 UIA 移动返回端点模式 | `path`，或 `from_x`、`from_y`、`to_x`、`to_y` |
 | `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |
 | `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
-| `launch_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点）；支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回目标；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `duration_s` / `wait_for` |
-| `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
+| `launch_app` / `wait` | 静默后台启动应用（以 Minimized 模式直接置于底层，零闪烁不抢焦点）；支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回可直接复用的 `window`；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `duration_s` / `wait_for` |
+| `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) 并核验窗口确实消失，否则返回 `window_close_unconfirmed` / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
-| `browser_state` | 列出标签页（默认仅 tab_id，`include_url: true` 才带 url/title），或返回 AI 独立浏览器标签页的有界语义快照（含 `page_status`） | `browser_endpoint`、`tab_id`?、`include_url`? |
+| `browser_state` / `browser_shutdown` | 列出标签页（默认仅 tab_id，`include_url: true` 才带 url/title），或返回 AI 独立浏览器标签页的有界语义快照（含 `page_status`）；仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint`、`tab_id`?、`include_url`? |
 | `browser_click` / `browser_type` / `browser_key` | 操作最新 `browser_state` 返回的 token；目标过期或身份变化时拒绝 | `browser_endpoint`、`tab_id`、`browser_element` |
 
 > `list_apps` 返回的 `app.id`、`displayName`、`isRunning` 与 `Window { id, app }` 可直接复用；`app` 也可用 pid 数字、进程名或窗口标题子串。桌面元素动作必须携带同一次 `get_window_state { include_text: true }` 返回的 `snapshot_id`。
