@@ -30,6 +30,7 @@
 | 观察快照绑定 | `get_window_state` 返回 `snapshot_id`；元素动作必须携带同一快照，快照过期、窗口移动、元素身份变化或动作消费后都会拒绝；未经验证的后台坐标点击不会回退到可能错误的控件 |
 | 持久浏览器会话 | 每个 AI 隔离浏览器 endpoint 复用一条有界 CDP WebSocket，并复用每个 tab 的 CDP session，不再每个动作重连；`browser_tabs`、`browser_history`、`browser_back` / `browser_forward`、条件式 `browser_wait` 提供会话级导航；`browser_events` 用游标返回新的 console/network/lifecycle 证据，`browser_downloads` 跟踪下载进度与已落盘文件。截图使用独立的非致命超时，慢截图不会误杀健康浏览器会话；`browser_state` / click / type / key 仍严格绑定 tab/document/name/role token，且绝不附着用户自己的浏览器 |
 | UIA 稳定身份与增量状态 | `include_text: true` 时每个控件增加稳定 `element_id`，并返回单调递增的 `accessibility_revision` 与 `accessibility_delta`（新增/删除/变化/未变化计数）。原有 `element_index + snapshot_id` 动作契约不变；stable id 只帮助跨观察推理，不绕过快照过期检查 |
+| 动作后验证与确定性恢复 | 动作可携带 `expect`，验证窗口存在/关闭、UIA 是否变化、stable element value、桌面文本、浏览器 URL/文本/ready、下载完成等结果；未满足时返回 `postcondition_failed`，不会盲目重放。可选 `recovery: "foreground_once"` 仅在明确 `not_executed + background_unavailable` 时尝试一次；元素恢复必须提供 `element_id`，先重新观察并映射新 index/snapshot，再执行 foreground |
 | 有界失败语义 | one-shot helper 有外部 watchdog；超时、断连或已派发后的传输错误返回 `outcome: "unknown"`，变更型动作不会自动重放 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 标准动作词汇 | 同时接受 OpenAI `double_click` / `type` / `keypress.keys` / `move` 与 Windows canonical `click` / `type_text` / `press_key` / `mouse_move`；支持 `scroll_x/scroll_y`、`drag.path`、三击和窗口级后台操作 |
@@ -61,7 +62,7 @@
 在 DSH profile 目录（`~/.dsh/profiles/web`）内执行：
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.3/dsh-pc-pilot-0.3.3.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.4/dsh-pc-pilot-0.3.4.tgz
 ```
 
 确认 profile 的 `package.json` 中 `dsh.profile.bundles` 数组包含 `"dsh-pc-pilot"`（市场安装会自动加入；手动安装需自行添加），然后重启 DSH 宿主。
@@ -135,6 +136,12 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `browser_events` / `browser_downloads` | 按 `event_cursor` 增量读取 console/network/lifecycle 证据；跟踪 Chromium 下载进度和已落盘文件 | `browser_endpoint`、`tab_id`?、`event_cursor`? |
 | `browser_shutdown` | 仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint` |
 | `browser_click` / `browser_type` / `browser_key` | 操作最新 `browser_state` 返回的 token；目标过期或身份变化时拒绝 | `browser_endpoint`、`tab_id`、`browser_element` |
+
+#### 动作后验证
+
+可在单个动作中加入 `expect`，例如 `{ "type": "element_value", "element_id": "...", "value": "done" }` 或 `{ "type": "browser_text", "text": "完成" }`。支持的条件包括 `window_exists`、`window_closed`、`accessibility_changed`、`element_value`、`text_present`、`browser_url`、`browser_text`、`browser_ready` 与 `download_completed`。验证失败时动作结果为 `postcondition_failed`，不会自动重复可能已经发生的变更。
+
+`recovery: "foreground_once"` 只处理一种确定情况：后台动作明确返回 `not_executed + background_unavailable`。如果是 element action，还必须同时传入观察时返回的 stable `element_id`，PC-Pilot 会先重新观察目标窗口、找回新的 `element_index + snapshot_id`，再做一次前台路径。任何 `unknown` 结果都不会自动重放。
 
 > `list_apps` 返回的 `app.id`、`displayName`、`isRunning` 与 `Window { id, app }` 可直接复用；`app` 也可用 pid 数字、进程名或窗口标题子串。桌面元素动作必须携带同一次 `get_window_state { include_text: true }` 返回的 `snapshot_id`。
 

@@ -18,6 +18,7 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 - **State-bound actions** — `get_window_state` returns a `snapshot_id` and `screenshot_id`; element actions must present that snapshot and coordinate actions can bind to the screenshot. Expired, moved, wrong-window, changed-element, or consumed state is rejected instead of falling back to a potentially wrong control.
 - **Persistent browser-use session** — one bounded CDP WebSocket is reused per isolated AI browser endpoint, with reusable per-tab sessions rather than reconnecting for every action. `browser_tabs`, `browser_history`, `browser_back` / `browser_forward`, and condition-based `browser_wait` provide session-level navigation; `browser_events` returns cursor-based console/network/lifecycle evidence and `browser_downloads` tracks Chromium download progress plus completed files. Screenshot observation has its own non-fatal timeout so a slow frame cannot tear down an otherwise healthy browser session. `browser_state`, `browser_click`, `browser_type`, and `browser_key` remain token-bound to the exact tab/document/name/role. `launch_app { app: "msedge.exe", headless: true }` still starts a fresh isolated profile and `browser_*` never attaches to the user's own browser.
 - **Stable UIA identity + incremental state** — `include_text: true` assigns every returned control a stable `element_id`, plus monotonic `accessibility_revision` and `accessibility_delta` metadata (`added`, `removed`, `changed`, `unchanged_count`). Existing snapshot-bound `element_index` actions remain fully compatible; the stable identity is for reasoning across observations, not for bypassing stale-snapshot checks.
+- **Verified postconditions and deterministic recovery** — actions can carry an `expect` contract for window presence/closure, accessibility change, stable-element value, desktop text, browser URL/text/readiness, or completed downloads. A failed postcondition is reported as `postcondition_failed` and is never blindly replayed. `recovery: "foreground_once"` is intentionally narrow: it may retry only after an explicit `not_executed + background_unavailable`; element recovery requires the observed stable `element_id` so PC-Pilot can re-observe and remap a fresh index/snapshot first.
 - **Bounded failure semantics** — one-shot helper calls have an external deadline watchdog. A timeout, disconnect, or post-dispatch transport error reports `outcome: "unknown"`; mutating actions are never replayed automatically.
 - **Computer-use loop parity** — send up to 20 ordered actions through `actions`; execution stops at the first failed or uncertain step, and canonical input actions return a fresh post-action observation. Browser mutations include a CDP PNG capture.
 - **Structured safety classification** — obvious consequential target names and sensitive browser fields are classified in the result for future host policy integration; the current PC-Pilot profile does not interpose confirmation.
@@ -48,7 +49,7 @@ Once listed, search for *dsh-pc-pilot* in the market and click install.
 ### From a GitHub release
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.3/dsh-pc-pilot-0.3.3.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.4/dsh-pc-pilot-0.3.4.tgz
 ```
 
 Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.
@@ -110,6 +111,9 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `wait_for` | — | On a window-targeted `wait`, wait for `accessibility_present` (any UIA descendant) or `accessibility_available` (a complete UIA tree). A timeout is an explicit, retry-safe `wait_condition_timeout`. |
 | `app` | — | pid number, process name, or window-title substring; same-titled duplicate windows are rejected unless `window_index` or `hwnd` identifies one, while differently titled windows of one app auto-resolve and return `chosen_hwnd`. |
 | `snapshot_id` | — | Required for desktop element actions; use the id from the latest `get_window_state { include_text: true }`. |
+| `element_id` | — | Stable UIA identity returned by `get_window_state`; optional for normal actions, required for safe element remapping during `foreground_once` recovery. |
+| `expect` | — | Optional postcondition: verify window state, accessibility change, element value, text, browser URL/text/readiness, or completed download after the action. |
+| `recovery` | `none` | `foreground_once` retries only a conclusively non-executed `background_unavailable` action. Unknown outcomes are never replayed. |
 | `browser_endpoint` / `tab_id` / `browser_element` / `event_cursor` | — | Explicit loopback DevTools endpoint, exact tab id, semantic token, and optional cursor for incremental browser evidence. |
 | `x` / `y` | — | Window-local pixels with `app`/`hwnd`, matching ChatGPT Computer Use; screen coordinates without a target. Set `coordinate_space: "screen"` only for an explicit absolute click. |
 | `button` / `click_count` / `keys` | `left` / `1` / — | Mouse button and legacy click repetitions; `keys` supplies standard keypress chords and mouse modifiers. Foreground mouse actions and validated native-window background clicks preserve the modifier state; unsupported background paths report `background_unavailable`. |

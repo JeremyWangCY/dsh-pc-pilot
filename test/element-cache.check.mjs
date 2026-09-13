@@ -103,13 +103,67 @@ try {
   assert.ok([...stableIds].some((id) => repeatedIds.has(id)),
     'stable element_id must survive across repeated observations of the same window')
 
-  const elIndex = repeatedState.elements[0].index
+  const textProbe = repeatedState.document_text || repeatedState.elements.find((element) => element.name)?.name || repeatedState.elements.find((element) => element.value)?.value
+  if (textProbe) {
+    const textCondition = await tool.execute({
+      action: 'wait',
+      duration_s: 0,
+      app: String(notepadPid),
+      include_text: true,
+      expect: { type: 'text_present', text: String(textProbe).slice(0, 80), timeout_ms: 0 },
+    })
+    assert.equal(textCondition.ok, true, `live text postcondition must verify when the provider exposes text: ${JSON.stringify(textCondition)}`)
+    assert.equal(textCondition.postcondition?.verified, true)
+    assert.equal(textCondition.postcondition?.type, 'text_present')
+  }
+
+  const windowCondition = await tool.execute({
+    action: 'wait',
+    duration_s: 0,
+    app: String(notepadPid),
+    expect: { type: 'window_exists', timeout_ms: 0 },
+  })
+  assert.equal(windowCondition.ok, true, `live window-exists postcondition must verify: ${JSON.stringify(windowCondition)}`)
+  assert.equal(windowCondition.postcondition?.verified, true)
+
+  const valuedElement = repeatedState.elements.find((element) => typeof element.value === 'string' && element.element_id)
+  assert.ok(valuedElement, 'scratch Notepad must expose an element suitable for stable-id value verification')
+  const valueCondition = await tool.execute({
+    action: 'wait',
+    duration_s: 0,
+    app: String(notepadPid),
+    include_text: true,
+    expect: { type: 'element_value', element_id: valuedElement.element_id, value: valuedElement.value, timeout_ms: 0 },
+  })
+  assert.equal(valueCondition.ok, true, `stable element value postcondition must verify: ${JSON.stringify(valueCondition)}`)
+  assert.equal(valueCondition.postcondition?.element_id, valuedElement.element_id)
+
+  const failedCondition = await tool.execute({
+    action: 'wait',
+    duration_s: 0,
+    app: String(notepadPid),
+    include_text: true,
+    expect: { type: 'text_present', text: '__PC_PILOT_IMPOSSIBLE_POSTCONDITION__', timeout_ms: 0 },
+  })
+  assert.equal(failedCondition.ok, false, 'unmet postcondition must fail the action result')
+  assert.equal(failedCondition.error_code, 'postcondition_failed')
+  assert.equal(failedCondition.postcondition?.verified, false)
+
+  const actionState = await tool.execute({
+    action: 'get_window_state',
+    app: String(notepadPid),
+    screenshot: false,
+    include_text: true,
+    dispatch: 'foreground',
+  })
+  assert.equal(actionState.ok, true, 'postcondition observations must leave the helper ready for a fresh explicit state')
+  const elIndex = actionState.elements[0].index
   const t0 = performance.now()
   const clickRes = await tool.execute({
     action: 'click',
     app: String(notepadPid),
     element: elIndex,
-    snapshot_id: repeatedState.snapshot_id,
+    snapshot_id: actionState.snapshot_id,
     dispatch: 'background',
     overlay: false,
   })
