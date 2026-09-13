@@ -769,6 +769,8 @@ function Get-OverlayEnabled {
 }
 
 if ($null -eq $script:processNameCache) { $script:processNameCache = @{} }
+if ($null -eq $script:accessibilityHistory) { $script:accessibilityHistory = @{} }
+if ($null -eq $script:accessibilityRevision) { $script:accessibilityRevision = [int64]0 }
 
 function Get-ProcessNameFast {
   param([uint32]$ProcessId, [hashtable]$Cache)
@@ -997,6 +999,106 @@ function Safe-Int {
   return [int]$d
 }
 
+function Get-StableElementId {
+  param($Element)
+  try {
+    $cur = $Element.Current
+    $runtime = [string]($Element.GetRuntimeId() -join '.')
+    if ($runtime) { return ('uia:{0}:{1}' -f [string]$cur.ProcessId, $runtime) }
+    return ('uiaf:{0}:{1}:{2}:{3}:{4}' -f [string]$cur.ProcessId,
+      [string]$cur.NativeWindowHandle, [string]$cur.AutomationId,
+      [string]$cur.ControlType.Id, [string]$cur.Name)
+  } catch {
+    return ''
+  }
+}
+
+function Get-AccessibilitySummary {
+  param($Item)
+  if ($null -eq $Item) { return $null }
+  return [ordered]@{
+    element_id = [string]$Item.element_id
+    index = [int]$Item.index
+    role = [string]$Item.role
+    name = [string]$Item.name
+    value = [string]$Item.value
+    automation_id = [string]$Item.automation_id
+    enabled = [bool]$Item.enabled
+    offscreen = [bool]$Item.offscreen
+    invokable = [bool]$Item.invokable
+    selected = [bool]$Item.selected
+    native_window_handle = [int64]$Item.native_window_handle
+    rect = ('{0},{1},{2},{3}' -f [int]$Item.rect.x, [int]$Item.rect.y, [int]$Item.rect.width, [int]$Item.rect.height)
+  }
+}
+
+function Get-AccessibilityDelta {
+  param([string]$Key, $Tree)
+  $script:accessibilityRevision = [int64]$script:accessibilityRevision + 1
+  $revision = [int64]$script:accessibilityRevision
+  $previous = $script:accessibilityHistory[$Key]
+  $current = @{}
+  foreach ($item in $Tree) {
+    $id = [string]$item.element_id
+    if (-not $id) { continue }
+    $current[$id] = Get-AccessibilitySummary $item
+  }
+
+  $added = New-Object System.Collections.Generic.List[object]
+  $removed = New-Object System.Collections.Generic.List[object]
+  $changed = New-Object System.Collections.Generic.List[object]
+  $unchanged = 0
+  $reset = ($null -eq $previous)
+
+  if (-not $reset) {
+    foreach ($id in $current.Keys) {
+      $now = $current[$id]
+      $before = $previous.items[$id]
+      if ($null -eq $before) {
+        $added.Add([ordered]@{ element_id = $id; index = $now.index; role = $now.role; name = $now.name })
+        continue
+      }
+      $fields = New-Object System.Collections.Generic.List[string]
+      foreach ($field in @('role','name','value','automation_id','enabled','offscreen','invokable','selected','native_window_handle','rect')) {
+        if ([string]$now[$field] -cne [string]$before[$field]) { $fields.Add($field) }
+      }
+      if ($fields.Count -gt 0) {
+        $changed.Add([ordered]@{ element_id = $id; index = $now.index; fields = $fields.ToArray() })
+      } else {
+        $unchanged++
+      }
+    }
+    foreach ($id in $previous.items.Keys) {
+      if (-not $current.ContainsKey($id)) {
+        $before = $previous.items[$id]
+        $removed.Add([ordered]@{ element_id = $id; role = $before.role; name = $before.name })
+      }
+    }
+  }
+
+  $script:accessibilityHistory[$Key] = @{
+    revision = $revision
+    items = $current
+    updated = [DateTime]::UtcNow
+  }
+  if ($script:accessibilityHistory.Count -gt 32) {
+    foreach ($oldKey in @($script:accessibilityHistory.Keys)) {
+      if ($oldKey -cne $Key) { $script:accessibilityHistory.Remove($oldKey) }
+      if ($script:accessibilityHistory.Count -le 16) { break }
+    }
+  }
+
+  return [ordered]@{
+    revision = $revision
+    base_revision = if ($reset) { $null } else { [int64]$previous.revision }
+    reset = $reset
+    added = $added.ToArray()
+    removed = $removed.ToArray()
+    changed = $changed.ToArray()
+    unchanged_count = $unchanged
+  }
+}
+
 function Get-AccessibilityTree {
   param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS, $WinRect = $null)
   $script:cachedTreeHwnd = $Hwnd
@@ -1014,6 +1116,7 @@ function Get-AccessibilityTree {
     $count++
     $script:cachedElements.Add($el)
     $script:cachedIdentities.Add((Get-ElementIdentity $el))
+    $stableId = Get-StableElementId $el
     $cur = $el.Current
     $rect = $cur.BoundingRectangle
     $name = $cur.Name
@@ -1036,6 +1139,7 @@ function Get-AccessibilityTree {
     $relY = if ($null -ne $WinRect) { Safe-Int ($rect.Y - $WinRect.Top) } else { Safe-Int $rect.Y }
     $item = [ordered]@{
       index = $count
+      element_id = $stableId
       role = $cur.ControlType.ProgrammaticName
       name = if ($name) { $name } else { '' }
       value = if ($value) { $value } else { '' }
@@ -2010,11 +2114,15 @@ function Do-AppState {
   # A plain successful response with elements:[] encouraged callers to invent
   # an element index and then fail later without a recovery direction.
   $accessibilityStatus = 'not_requested'
+  $accessibilityRevision = $null
+  $accessibilityDelta = $null
   $script:cachedTreeHwnd = [IntPtr]::Zero
   $script:cachedElements = $null
   $script:cachedIdentities = $null
   if ($WithText) {
     $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+    $bestCachedElements = $script:cachedElements
+    $bestCachedIdentities = $script:cachedIdentities
     # DESK-03: a freshly launched Win11 Notepad (and several WinUI apps) can
     # expose only a root pane or no descendants while the first frame settles.
     # A partial tree has evidence that the provider is coming up, so allow it a
@@ -2040,7 +2148,11 @@ function Do-AppState {
       for ($attempt = 0; $attempt -lt $retryLimit -and $needsStabilization; $attempt++) {
         Start-Sleep -Milliseconds 250
         $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-        if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+        if ($retryTree.Count -gt $tree.Count) {
+          $tree = $retryTree
+          $bestCachedElements = $script:cachedElements
+          $bestCachedIdentities = $script:cachedIdentities
+        }
 
         if ($tree.Count -gt 2) {
           $needsStabilization = $false
@@ -2058,9 +2170,15 @@ function Do-AppState {
         }
       }
     }
+    $script:cachedTreeHwnd = $win.Hwnd
+    $script:cachedElements = $bestCachedElements
+    $script:cachedIdentities = $bestCachedIdentities
     if ($tree.Count -eq 0) { $accessibilityStatus = 'unavailable' }
     elseif ($tree.Count -le 2) { $accessibilityStatus = 'partial' }
     else { $accessibilityStatus = 'available' }
+    $deltaKey = ('{0}:{1}' -f [string]$win.Hwnd.ToInt64(), [string]$win.Pid)
+    $accessibilityDelta = Get-AccessibilityDelta -Key $deltaKey -Tree $tree
+    $accessibilityRevision = $accessibilityDelta.revision
     $docText = Get-DocumentText $win.Hwnd
     $focusedElement = Get-FocusedElementText $win.Hwnd
     $selectedText = Get-SelectedText $win.Hwnd
@@ -2084,6 +2202,8 @@ function Do-AppState {
     elements = $tree
     element_count = $tree.Count
     accessibility_status = $accessibilityStatus
+    accessibility_revision = $accessibilityRevision
+    accessibility_delta = $accessibilityDelta
     document_text = if ($docText) { $docText } else { '' }
     focused_element = if ($focusedElement) { $focusedElement } else { '' }
     selected_text = if ($selectedText) { $selectedText } else { '' }
@@ -2503,6 +2623,8 @@ function Invoke-ActionRequest {
       $result.elements = $st.elements
       $result.element_count = $st.element_count
       $result.accessibility_status = $st.accessibility_status
+      $result.accessibility_revision = $st.accessibility_revision
+      $result.accessibility_delta = $st.accessibility_delta
       $result.document_text = $st.document_text
       $result.note = $st.note
       $result.accessibility = if ([bool]$withText) {
@@ -2514,7 +2636,7 @@ function Invoke-ActionRequest {
           if ($_.value) { $line += " = $($_.value)" }
           $line
         })
-        @{ status = $st.accessibility_status; tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text; selected_elements = $st.selected_elements }
+        @{ status = $st.accessibility_status; revision = $st.accessibility_revision; delta = $st.accessibility_delta; tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text; selected_elements = $st.selected_elements }
       } else { $null }
       $result.dispatch = (Get-Dispatch)
       $result.message = "State captured for '$app' ($($st.element_count) elements)"

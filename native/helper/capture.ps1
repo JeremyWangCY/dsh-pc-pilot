@@ -220,11 +220,15 @@ function Do-AppState {
   # A plain successful response with elements:[] encouraged callers to invent
   # an element index and then fail later without a recovery direction.
   $accessibilityStatus = 'not_requested'
+  $accessibilityRevision = $null
+  $accessibilityDelta = $null
   $script:cachedTreeHwnd = [IntPtr]::Zero
   $script:cachedElements = $null
   $script:cachedIdentities = $null
   if ($WithText) {
     $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+    $bestCachedElements = $script:cachedElements
+    $bestCachedIdentities = $script:cachedIdentities
     # DESK-03: a freshly launched Win11 Notepad (and several WinUI apps) can
     # expose only a root pane or no descendants while the first frame settles.
     # A partial tree has evidence that the provider is coming up, so allow it a
@@ -250,7 +254,11 @@ function Do-AppState {
       for ($attempt = 0; $attempt -lt $retryLimit -and $needsStabilization; $attempt++) {
         Start-Sleep -Milliseconds 250
         $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
-        if ($retryTree.Count -gt $tree.Count) { $tree = $retryTree }
+        if ($retryTree.Count -gt $tree.Count) {
+          $tree = $retryTree
+          $bestCachedElements = $script:cachedElements
+          $bestCachedIdentities = $script:cachedIdentities
+        }
 
         if ($tree.Count -gt 2) {
           $needsStabilization = $false
@@ -268,9 +276,15 @@ function Do-AppState {
         }
       }
     }
+    $script:cachedTreeHwnd = $win.Hwnd
+    $script:cachedElements = $bestCachedElements
+    $script:cachedIdentities = $bestCachedIdentities
     if ($tree.Count -eq 0) { $accessibilityStatus = 'unavailable' }
     elseif ($tree.Count -le 2) { $accessibilityStatus = 'partial' }
     else { $accessibilityStatus = 'available' }
+    $deltaKey = ('{0}:{1}' -f [string]$win.Hwnd.ToInt64(), [string]$win.Pid)
+    $accessibilityDelta = Get-AccessibilityDelta -Key $deltaKey -Tree $tree
+    $accessibilityRevision = $accessibilityDelta.revision
     $docText = Get-DocumentText $win.Hwnd
     $focusedElement = Get-FocusedElementText $win.Hwnd
     $selectedText = Get-SelectedText $win.Hwnd
@@ -294,6 +308,8 @@ function Do-AppState {
     elements = $tree
     element_count = $tree.Count
     accessibility_status = $accessibilityStatus
+    accessibility_revision = $accessibilityRevision
+    accessibility_delta = $accessibilityDelta
     document_text = if ($docText) { $docText } else { '' }
     focused_element = if ($focusedElement) { $focusedElement } else { '' }
     selected_text = if ($selectedText) { $selectedText } else { '' }

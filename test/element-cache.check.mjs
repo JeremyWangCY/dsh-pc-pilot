@@ -71,14 +71,45 @@ try {
   assert.equal(typeof stateRes.accessibility?.focused_element, 'string', 'include_text:true must expose focused-element context when the provider can identify it')
   assert.equal(typeof stateRes.accessibility?.selected_text, 'string', 'include_text:true must expose selected-text context when the provider supports it')
   assert.ok(Array.isArray(stateRes.accessibility?.selected_elements), 'include_text:true must expose selected accessibility elements')
+  assert.ok(Number.isInteger(stateRes.accessibility_revision) && stateRes.accessibility_revision > 0,
+    'include_text:true must expose a monotonic accessibility revision')
+  assert.equal(stateRes.accessibility?.revision, stateRes.accessibility_revision,
+    'accessibility object must expose the same revision as the top-level response')
+  assert.equal(stateRes.accessibility_delta?.reset, false,
+    'the prior wait observation should provide a base revision for the next full state')
+  assert.equal(stateRes.accessibility_delta?.base_revision, waited.post_action_observation?.accessibility_revision,
+    'incremental UIA state must explicitly reference its base revision')
+  assert.ok(stateRes.elements.every((element) => typeof element.element_id === 'string' && element.element_id.length > 0),
+    'every returned UIA element must expose a stable element_id')
 
-  const elIndex = stateRes.elements[0].index
+  const stableIds = new Set(stateRes.elements.map((element) => element.element_id))
+  const repeatedState = await tool.execute({
+    action: 'get_window_state',
+    app: String(notepadPid),
+    screenshot: false,
+    include_text: true,
+    dispatch: 'foreground',
+  })
+  assert.equal(repeatedState.ok, true, `second stable-state observation must succeed: ${JSON.stringify(repeatedState)}`)
+  assert.ok(repeatedState.accessibility_revision > stateRes.accessibility_revision,
+    'accessibility revision must increase on each semantic observation')
+  assert.equal(repeatedState.accessibility_delta?.reset, false,
+    'same-window repeated observation must stay on the incremental history')
+  assert.equal(repeatedState.accessibility_delta?.base_revision, stateRes.accessibility_revision,
+    'second observation delta must reference the immediately previous revision')
+  assert.ok(repeatedState.accessibility_delta?.unchanged_count > 0,
+    'an unchanged scratch window must report stable unchanged UIA elements')
+  const repeatedIds = new Set(repeatedState.elements.map((element) => element.element_id))
+  assert.ok([...stableIds].some((id) => repeatedIds.has(id)),
+    'stable element_id must survive across repeated observations of the same window')
+
+  const elIndex = repeatedState.elements[0].index
   const t0 = performance.now()
   const clickRes = await tool.execute({
     action: 'click',
     app: String(notepadPid),
     element: elIndex,
-    snapshot_id: stateRes.snapshot_id,
+    snapshot_id: repeatedState.snapshot_id,
     dispatch: 'background',
     overlay: false,
   })

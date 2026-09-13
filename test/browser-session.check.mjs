@@ -13,6 +13,7 @@ const edge = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\
 assert.ok(existsSync(edge), 'Set EDGE_PATH to a Chromium/Edge executable')
 let submitted = ''
 let likes = 0
+const downloadedFiles = []
 const server = http.createServer(async (req, res) => {
   if (req.url === '/submit') {
     for await (const data of req) submitted += data
@@ -20,6 +21,12 @@ const server = http.createServer(async (req, res) => {
     return
   }
   if (req.url === '/like') { likes++; res.end('ok'); return }
+  if (req.url === '/download') {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename="pc-pilot-fixture.txt"')
+    res.end('pc-pilot download fixture')
+    return
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.end(`<!doctype html><meta charset="utf-8"><form>
     <label>Message<input id="message" value="DO_NOT_EXPOSE_VALUE"></label>
@@ -32,6 +39,7 @@ const server = http.createServer(async (req, res) => {
     <button type="button" id="spa">Change URL</button>
     <button type="button" id="victim">Victim</button>
     <button type="button" id="latest">Latest</button>
+    <a id="download" href="/download">Download file</a>
     <article id="scroll-target" style="margin-top:3000px">VISIBLE TARGET COMMENT</article></form><script>
     message.value = '';
     message.addEventListener('keydown', async e => {
@@ -40,7 +48,7 @@ const server = http.createServer(async (req, res) => {
         message.setAttribute('aria-label','Submitted');
       }
     });
-    like.onclick = async () => { await fetch('/like', {method:'POST'}); like.setAttribute('aria-label','Liked'); };
+    like.onclick = async () => { console.log('fixture-like-clicked'); await fetch('/like', {method:'POST'}); like.setAttribute('aria-label','Liked'); };
     rename.onclick = () => victim.textContent = 'Changed';
     remove.onclick = () => victim.remove();
     rolechange.onclick = () => victim.setAttribute('role','link');
@@ -107,6 +115,25 @@ try {
   }
   const click = (element, options = {}) => browserAction('browser_click', { ...args, element, ...options })
   let s = await eventually(async () => { const value = await state(); get(value, 'Message'); return value })
+  assert.ok(typeof s.navigation_id === 'string' && s.navigation_id, 'browser_state exposes navigation identity')
+  assert.equal(typeof s.can_go_back, 'boolean')
+  assert.equal(typeof s.can_go_forward, 'boolean')
+  const initialBrowserSession = s.browser_session_id
+  const assertBrowserSessionStable = async label => {
+    const value = await browserAction('browser_tabs', { browser_endpoint })
+    assert.equal(value.browser_session_id, initialBrowserSession, `persistent browser session changed during ${label}`)
+  }
+  const tabs = await browserAction('browser_tabs', { browser_endpoint, include_url: true })
+  assert.equal(tabs.ok, true)
+  assert.ok(tabs.tab_count >= 2 && tabs.pages.some(page => page.tab_id === tab_id), 'browser_tabs lists exact page targets')
+  const readyWait = await browserAction('browser_wait', { ...args, browser_wait_for: 'ready', browser_wait_timeout_ms: 2000 })
+  assert.equal(readyWait.ok, true)
+  assert.equal(readyWait.ready_state, 'complete')
+  const textWait = await browserAction('browser_wait', { ...args, browser_wait_for: 'text', text: 'VISIBLE TARGET COMMENT', browser_wait_timeout_ms: 2000 })
+  assert.equal(textWait.ok, true)
+  const missedWait = await browserAction('browser_wait', { ...args, browser_wait_for: 'text', text: 'TEXT THAT WILL NEVER APPEAR', browser_wait_timeout_ms: 50 })
+  assert.equal(missedWait.ok, false)
+  assert.equal(missedWait.error_code, 'browser_wait_timeout')
   const visibleShadow = await browserAction('browser_state', { ...args, include_visible_text: true })
   assert.ok(visibleShadow.visible_text.includes('Shadow button'), 'visible text traverses open shadow roots')
   const scrolled = await browserAction('browser_scroll', { ...args, scroll_y: 120 })
@@ -123,13 +150,26 @@ try {
   assert.equal(get(await state(), 'Message'), message, 'tokens stable across state/connection')
   const typed = await browserAction('browser_type', { ...args, element: message, text: 'fixture secret 123' })
   assert.ok(typed.screenshot?.path && existsSync(typed.screenshot.path), 'browser mutation returns a fresh screenshot')
+  await assertBrowserSessionStable('typing')
   assert.ok(!JSON.stringify(await state()).includes('fixture secret'))
   await assert.rejects(browserAction('browser_replace', { ...args, element: message, text: 'wrong', expected_url: 'https://wrong.invalid/' }), /URL changed/)
   await browserAction('browser_replace', { ...args, element: message, text: 'replacement text', expected_url: s.url })
   await browserAction('browser_key', { ...args, element: message, key: 'Ctrl+Enter' })
   await eventually(() => { assert.equal(submitted, 'replacement text'); return true })
+  await assertBrowserSessionStable('replace-and-key')
+  const eventCursorBeforeLike = s.event_cursor
   await click(get(s, 'Like 0'), { confirmation: 'approved' })
   await eventually(() => { assert.equal(likes, 1); return true })
+  const eventEvidence = await eventually(async () => {
+    const value = await browserAction('browser_events', { ...args, event_cursor: eventCursorBeforeLike })
+    assert.ok(value.events.some(event => event.kind === 'response' && event.url.endsWith('/like') && event.status === 200), 'browser_events captures newer network evidence')
+    assert.ok(value.events.some(event => event.kind === 'console' && event.text.includes('fixture-like-clicked')), 'browser_events captures newer console evidence')
+    return value
+  })
+  assert.equal(eventEvidence.browser_session_id, initialBrowserSession, 'browser_events must stay on the same persistent session')
+  assert.equal(eventEvidence.events_reset, false)
+  const noDuplicateEvents = await browserAction('browser_events', { ...args, event_cursor: eventEvidence.event_cursor })
+  assert.equal(noDuplicateEvents.events.length, 0, 'event cursor prevents replaying old evidence')
   const victim = get(s, 'Victim')
   await click(get(s, 'Rename'))
   await assert.rejects(click(victim), /stale|rejected/i)
@@ -151,8 +191,39 @@ try {
   await assert.rejects(click(oldRefresh), /Stale|rejected/)
   assert.equal(likes, 1, 'click dispatched once; persisted through reload')
   const beforeUrlChange = get(s, 'Message')
+  const originalUrl = s.url
   await click(get(s, 'Change URL'))
   await assert.rejects(browserAction('browser_type', { ...args, element: beforeUrlChange, text: 'must not type' }), /Stale/)
+  const urlChanged = await browserAction('browser_wait', { ...args, browser_wait_for: 'url_change', expected_url: originalUrl, browser_wait_timeout_ms: 2000 })
+  assert.equal(urlChanged.ok, true)
+  assert.ok(urlChanged.url.endsWith('/changed'))
+  const historyChanged = await browserAction('browser_history', args)
+  assert.equal(historyChanged.ok, true)
+  assert.equal(historyChanged.can_go_back, true)
+  assert.ok(historyChanged.entries.some(entry => entry.url.endsWith('/changed')), 'browser_history exposes current SPA history entry')
+  const back = await browserAction('browser_back', args)
+  assert.equal(back.ok, true)
+  const backWait = await browserAction('browser_wait', { ...args, browser_wait_for: 'url_change', expected_url: urlChanged.url, browser_wait_timeout_ms: 2000 })
+  assert.equal(backWait.ok, true)
+  assert.equal(backWait.url, originalUrl)
+  const historyBack = await browserAction('browser_history', args)
+  assert.equal(historyBack.can_go_forward, true)
+  const forward = await browserAction('browser_forward', args)
+  assert.equal(forward.ok, true)
+  const forwardWait = await browserAction('browser_wait', { ...args, browser_wait_for: 'url_change', expected_url: originalUrl, browser_wait_timeout_ms: 2000 })
+  assert.equal(forwardWait.ok, true)
+  assert.ok(forwardWait.url.endsWith('/changed'))
+  s = await eventually(async () => { const value = await state(); get(value, 'Download file'); return value })
+  await click(get(s, 'Download file'))
+  const downloadState = await eventually(async () => {
+    const value = await browserAction('browser_downloads', { browser_endpoint })
+    const completed = value.downloads.find(item => item.suggested_filename === 'pc-pilot-fixture.txt' && item.state === 'completed')
+    assert.ok(completed, 'browser_downloads tracks completed Chromium download')
+    const file = value.files.find(item => item.name === 'pc-pilot-fixture.txt')
+    assert.ok(file && existsSync(file.path) && file.bytes > 0, 'browser_downloads exposes completed file path')
+    return value
+  })
+  downloadedFiles.push(...downloadState.files.map(file => file.path))
   const opened = await browserAction('browser_open', { browser_endpoint, url: `http://127.0.0.1:${server.address().port}/second` })
   assert.notEqual(opened.tab_id, tab_id)
   const openedState = await browserAction('browser_state', { browser_endpoint, tab_id: opened.tab_id })
@@ -199,7 +270,7 @@ try {
     for (const socket of sockets) socket.destroy()
     await new Promise(resolve => stalled.close(resolve))
   }
-  console.log('PASS: Edge headless state/tokens/type/Ctrl+Enter/like/reload/name+role+detached+navigation stale/wrong-tab/abort/connect+command timeout/disconnect/endpoint restrictions')
+  console.log('PASS: Edge headless persistent-session/events/downloads/tabs/history/back-forward/waits/state/tokens/type/Ctrl+Enter/like/reload/name+role+detached+navigation stale/wrong-tab/abort/connect+command timeout/disconnect/endpoint restrictions')
 } finally {
   // Browser.close is sent only to the unique profile endpoint spawned above.
   if (control?.readyState === WebSocket.OPEN) {
@@ -210,5 +281,6 @@ try {
     try { execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* Browser.close already ended the owned profile tree */ }
   }
   await new Promise(resolve => server.close(resolve))
+  for (const file of downloadedFiles) await rm(file, { force: true })
   await rm(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 }

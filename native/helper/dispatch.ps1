@@ -405,6 +405,8 @@ function Invoke-ActionRequest {
       $result.elements = $st.elements
       $result.element_count = $st.element_count
       $result.accessibility_status = $st.accessibility_status
+      $result.accessibility_revision = $st.accessibility_revision
+      $result.accessibility_delta = $st.accessibility_delta
       $result.document_text = $st.document_text
       $result.note = $st.note
       $result.accessibility = if ([bool]$withText) {
@@ -416,7 +418,7 @@ function Invoke-ActionRequest {
           if ($_.value) { $line += " = $($_.value)" }
           $line
         })
-        @{ status = $st.accessibility_status; tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text; selected_elements = $st.selected_elements }
+        @{ status = $st.accessibility_status; revision = $st.accessibility_revision; delta = $st.accessibility_delta; tree = ($treeLines -join "`n"); document_text = $st.document_text; focused_element = $st.focused_element; selected_text = $st.selected_text; selected_elements = $st.selected_elements }
       } else { $null }
       $result.dispatch = (Get-Dispatch)
       $result.message = "State captured for '$app' ($($st.element_count) elements)"

@@ -16,7 +16,8 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 - **Reusable Windows targets** — observations return `window: { id, app }`, which can be supplied unchanged to the next action. Element actions use `element_index`; screenshot coordinates use `scrollX` / `scrollY` and `mouse_button` where applicable.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
 - **State-bound actions** — `get_window_state` returns a `snapshot_id` and `screenshot_id`; element actions must present that snapshot and coordinate actions can bind to the screenshot. Expired, moved, wrong-window, changed-element, or consumed state is rejected instead of falling back to a potentially wrong control.
-- **Browser semantic route** — `browser_state`, `browser_click`, `browser_type`, and `browser_key` use an explicit loopback DevTools endpoint belonging to the isolated AI browser profile. `launch_app { app: "msedge.exe", headless: true }` starts that isolated Chromium process (per-launch temp profile, vendor welcome tab auto-closed) and exposes the endpoint; `browser_*` never attaches to the user's own browser. `browser_shutdown` closes only a browser launched by the same PC-Pilot tool instance. Browser tokens are tab/document/name/role-bound and stale tokens are rejected without retry. Tab listing withholds URL/title unless `include_url: true`; tab snapshots carry `page_status` so blocked/crashed/error pages are legible instead of reading as 0-element successes. URLs are HTTP(S) only — `file://` is rejected (serve local content over a local HTTP server).
+- **Persistent browser-use session** — one bounded CDP WebSocket is reused per isolated AI browser endpoint, with reusable per-tab sessions rather than reconnecting for every action. `browser_tabs`, `browser_history`, `browser_back` / `browser_forward`, and condition-based `browser_wait` provide session-level navigation; `browser_events` returns cursor-based console/network/lifecycle evidence and `browser_downloads` tracks Chromium download progress plus completed files. Screenshot observation has its own non-fatal timeout so a slow frame cannot tear down an otherwise healthy browser session. `browser_state`, `browser_click`, `browser_type`, and `browser_key` remain token-bound to the exact tab/document/name/role. `launch_app { app: "msedge.exe", headless: true }` still starts a fresh isolated profile and `browser_*` never attaches to the user's own browser.
+- **Stable UIA identity + incremental state** — `include_text: true` assigns every returned control a stable `element_id`, plus monotonic `accessibility_revision` and `accessibility_delta` metadata (`added`, `removed`, `changed`, `unchanged_count`). Existing snapshot-bound `element_index` actions remain fully compatible; the stable identity is for reasoning across observations, not for bypassing stale-snapshot checks.
 - **Bounded failure semantics** — one-shot helper calls have an external deadline watchdog. A timeout, disconnect, or post-dispatch transport error reports `outcome: "unknown"`; mutating actions are never replayed automatically.
 - **Computer-use loop parity** — send up to 20 ordered actions through `actions`; execution stops at the first failed or uncertain step, and canonical input actions return a fresh post-action observation. Browser mutations include a CDP PNG capture.
 - **Structured safety classification** — obvious consequential target names and sensitive browser fields are classified in the result for future host policy integration; the current PC-Pilot profile does not interpose confirmation.
@@ -47,7 +48,7 @@ Once listed, search for *dsh-pc-pilot* in the market and click install.
 ### From a GitHub release
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.2/dsh-pc-pilot-0.3.2.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.3/dsh-pc-pilot-0.3.3.tgz
 ```
 
 Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.
@@ -71,16 +72,16 @@ While the overlay is enabled (default), each first action launches two tiny resi
 The plugin registers one global tool, `computer`. Typical flow:
 
 1. `computer { action: "list_apps" }` — running apps with pids, window titles, hwnds and rects.
-2. `computer { action: "get_window_state", window: { id, app }, include_screenshot: true }` — indexed accessibility tree (element index / role / name / value / automation_id / rect / invokable) plus a window screenshot and `snapshot_id`.
+2. `computer { action: "get_window_state", window: { id, app }, include_screenshot: true, include_text: true }` — indexed accessibility tree with stable `element_id`, revision/delta metadata, a window screenshot and `snapshot_id`.
 3. Act on the state — element actions include the `snapshot_id` from the same observation. Browser actions use `browser_state` first, then a tab id and `browser_element` token.
 4. Refresh the state after every UI change; element indexes are only valid for the `get_window_state` that produced them.
 
-### Action reference (46 actions)
+### Action reference (53 actions)
 
 | Action | Purpose |
 | --- | --- |
 | `list_apps` / `list_windows` / `list_displays` | Enumerate apps / per-app windows / display topology |
-| `get_window_state` | Indexed UIA tree + per-window PNG screenshot + document text |
+| `get_window_state` | Indexed UIA tree + stable element ids + revision/delta metadata + per-window PNG screenshot + document text |
 | `click` | Coordinate click or snapshot-bound `element_index` click |
 | `set_value` / `type_text` / `perform_secondary_action` / `select_text` | Element-level write, text entry, named UIA pattern, text-range selection |
 | `press_key` / `hold_key` | Key chords and timed holds |
@@ -92,7 +93,9 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `launch_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); registered Windows activation protocols such as `ms-settings:display` are supported. Delegated app launches return a target only when exactly one new window is safely identifiable; pause between actions |
 | `activate_window` / `close_window` / `get_window` | Bring window to foreground / request a graceful WM_CLOSE and verify disappearance (otherwise returns `window_close_unconfirmed`) / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
-| `browser_state` / `browser_shutdown` | List tabs (ids only unless `include_url: true`) or return a bounded semantic snapshot of an AI-owned browser tab (with `page_status`); close the entire browser only when this PC-Pilot tool instance launched it |
+| `browser_tabs` / `browser_state` / `browser_history` / `browser_back` / `browser_forward` / `browser_wait` | Manage exact tabs, inspect semantic state, navigate history, and wait on page readiness/URL/text without synthetic sleeps |
+| `browser_events` / `browser_downloads` | Cursor-based console/network/lifecycle evidence; Chromium download progress and completed AI-profile files |
+| `browser_shutdown` | Close the entire browser only when this PC-Pilot tool instance launched it |
 | `browser_click` / `browser_type` / `browser_key` | Operate a token from the latest `browser_state`; stale or changed targets are rejected |
 
 ### Key parameters
@@ -107,7 +110,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `wait_for` | — | On a window-targeted `wait`, wait for `accessibility_present` (any UIA descendant) or `accessibility_available` (a complete UIA tree). A timeout is an explicit, retry-safe `wait_condition_timeout`. |
 | `app` | — | pid number, process name, or window-title substring; same-titled duplicate windows are rejected unless `window_index` or `hwnd` identifies one, while differently titled windows of one app auto-resolve and return `chosen_hwnd`. |
 | `snapshot_id` | — | Required for desktop element actions; use the id from the latest `get_window_state { include_text: true }`. |
-| `browser_endpoint` / `tab_id` / `browser_element` | — | Explicit loopback DevTools endpoint, exact tab id, and token from the latest `browser_state`. |
+| `browser_endpoint` / `tab_id` / `browser_element` / `event_cursor` | — | Explicit loopback DevTools endpoint, exact tab id, semantic token, and optional cursor for incremental browser evidence. |
 | `x` / `y` | — | Window-local pixels with `app`/`hwnd`, matching ChatGPT Computer Use; screen coordinates without a target. Set `coordinate_space: "screen"` only for an explicit absolute click. |
 | `button` / `click_count` / `keys` | `left` / `1` / — | Mouse button and legacy click repetitions; `keys` supplies standard keypress chords and mouse modifiers. Foreground mouse actions and validated native-window background clicks preserve the modifier state; unsupported background paths report `background_unavailable`. |
 | `actions` | — | Ordered batch of action objects (maximum 20); execution continues for classified consequential targets and reports the safety class. |

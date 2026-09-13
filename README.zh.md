@@ -28,7 +28,8 @@
 | 结构化安全分类 | 检测到明显的提交、发布、购买、删除、认证或敏感浏览器字段时标记 `safety.class=consequential`；当前 pc-pilot 不拦截执行，后续可由宿主接入确认策略 |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
 | 观察快照绑定 | `get_window_state` 返回 `snapshot_id`；元素动作必须携带同一快照，快照过期、窗口移动、元素身份变化或动作消费后都会拒绝；未经验证的后台坐标点击不会回退到可能错误的控件 |
-| 浏览器语义通道 | `browser_state` / `browser_click` / `browser_type` / `browser_key` 只接受 AI 独立 profile 的显式 loopback DevTools endpoint；`launch_app { app: "msedge.exe", headless: true }` 启动该隔离 Chromium 进程（每次启动临时 profile，并自动关闭厂商 welcome 噪音标签页）并返回 endpoint；`browser_*` 永不附着到用户自己的浏览器；标签页、文档、元素 name/role 不一致时拒绝且不重试。快照、可见文本、精确文本定位均覆盖主文档和开放 Shadow DOM；标签页列表默认只返回 tab_id（`include_url: true` 才带 url/title）；标签页快照带 `page_status`，被风控/崩溃/出错页可识别而不是 0 元素假成功。URL 仅限 HTTP(S)，`file://` 被拒绝（本地内容请自起本地 HTTP 服务） |
+| 持久浏览器会话 | 每个 AI 隔离浏览器 endpoint 复用一条有界 CDP WebSocket，并复用每个 tab 的 CDP session，不再每个动作重连；`browser_tabs`、`browser_history`、`browser_back` / `browser_forward`、条件式 `browser_wait` 提供会话级导航；`browser_events` 用游标返回新的 console/network/lifecycle 证据，`browser_downloads` 跟踪下载进度与已落盘文件。截图使用独立的非致命超时，慢截图不会误杀健康浏览器会话；`browser_state` / click / type / key 仍严格绑定 tab/document/name/role token，且绝不附着用户自己的浏览器 |
+| UIA 稳定身份与增量状态 | `include_text: true` 时每个控件增加稳定 `element_id`，并返回单调递增的 `accessibility_revision` 与 `accessibility_delta`（新增/删除/变化/未变化计数）。原有 `element_index + snapshot_id` 动作契约不变；stable id 只帮助跨观察推理，不绕过快照过期检查 |
 | 有界失败语义 | one-shot helper 有外部 watchdog；超时、断连或已派发后的传输错误返回 `outcome: "unknown"`，变更型动作不会自动重放 |
 | 遮挡免疫后台点击 | 指定 `app` 时，坐标点击瞄准目标窗口自身的 UIA 树 / hwnd——窗口被完全遮挡也能无人值守操作，用户可继续在前台工作 |
 | 标准动作词汇 | 同时接受 OpenAI `double_click` / `type` / `keypress.keys` / `move` 与 Windows canonical `click` / `type_text` / `press_key` / `mouse_move`；支持 `scroll_x/scroll_y`、`drag.path`、三击和窗口级后台操作 |
@@ -60,7 +61,7 @@
 在 DSH profile 目录（`~/.dsh/profiles/web`）内执行：
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.2/dsh-pc-pilot-0.3.2.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.3/dsh-pc-pilot-0.3.3.tgz
 ```
 
 确认 profile 的 `package.json` 中 `dsh.profile.bundles` 数组包含 `"dsh-pc-pilot"`（市场安装会自动加入；手动安装需自行添加），然后重启 DSH 宿主。
@@ -110,12 +111,12 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 // 4. UI 变化后刷新状态再继续（元素 index 只对产生它的那次 get_window_state 有效）
 ```
 
-### 动作参考（46 个动作）
+### 动作参考（53 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
 | `list_apps` / `list_windows` / `list_displays` | 列出运行中的应用 / 单应用多窗口 / 显示器拓扑 | 无 / `app`? / 无 |
-| `get_window_state` | 默认截图优先；`include_text: true` 时构建索引化无障碍树并附带 `document_text` | `window`、`include_screenshot`、`include_text` |
+| `get_window_state` | 默认截图优先；`include_text: true` 时构建带稳定 `element_id`、revision/delta 的索引化无障碍树并附带 `document_text` | `window`、`include_screenshot`、`include_text` |
 | `click` | 标准坐标、左/右/中键、`wheel`（中键）、扩展 `back` / `forward` 键与多击，或绑定快照的 UIA 元素点击 | `window`、`x`、`y`、`mouse_button`、`click_count`；元素动作还需 `element_index`、`snapshot_id` |
 | `set_value` | 直接替换元素文本值（UIA ValuePattern）；读回值不一致时返回 `value_verification_failed`，要求重新观察 | `window`、`element_index`、`snapshot_id`、`value` |
 | `type_text` | 向已验证焦点输入文本 | `window`、`text` |
@@ -130,7 +131,9 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `launch_app` / `wait` | 默认静默后台最小化启动应用；只有用户明确要求带到前台、或现代应用必须在前台暴露 UIA 时才传 `activate: true`。支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回可直接复用的 `window`；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `activate`? / `duration_s` / `wait_for` |
 | `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) 并核验窗口确实消失，否则返回 `window_close_unconfirmed` / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
-| `browser_state` / `browser_shutdown` | 列出标签页（默认仅 tab_id，`include_url: true` 才带 url/title），或返回 AI 独立浏览器标签页的有界语义快照（含 `page_status`）；仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint`、`tab_id`?、`include_url`? |
+| `browser_tabs` / `browser_state` / `browser_history` / `browser_back` / `browser_forward` / `browser_wait` | 精确管理标签页、读取语义状态、历史前进后退，并等待 ready/URL 变化/指定文本 | `browser_endpoint`、`tab_id`?、`include_url`?、`browser_wait_for`? |
+| `browser_events` / `browser_downloads` | 按 `event_cursor` 增量读取 console/network/lifecycle 证据；跟踪 Chromium 下载进度和已落盘文件 | `browser_endpoint`、`tab_id`?、`event_cursor`? |
+| `browser_shutdown` | 仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint` |
 | `browser_click` / `browser_type` / `browser_key` | 操作最新 `browser_state` 返回的 token；目标过期或身份变化时拒绝 | `browser_endpoint`、`tab_id`、`browser_element` |
 
 > `list_apps` 返回的 `app.id`、`displayName`、`isRunning` 与 `Window { id, app }` 可直接复用；`app` 也可用 pid 数字、进程名或窗口标题子串。桌面元素动作必须携带同一次 `get_window_state { include_text: true }` 返回的 `snapshot_id`。
