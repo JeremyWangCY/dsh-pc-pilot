@@ -381,12 +381,38 @@ function Invoke-ActionRequest {
         if ($w.Rect.Left -lt -10000 -or $w.Rect.Top -lt -10000) { continue }
         if (-not $byPid.ContainsKey($w.Pid)) {
           $name = Get-ProcessNameFast -ProcessId $w.Pid -Cache $procCache
-          $byPid[$w.Pid] = @{ pid = $w.Pid; name = $name; windows = New-Object System.Collections.ArrayList }
+          $identity = Get-ProcessIdentityFast -ProcessId $w.Pid
+          $byPid[$w.Pid] = @{ pid = $w.Pid; name = $name; identity = $identity; windows = New-Object System.Collections.ArrayList }
         }
-        $null = $byPid[$w.Pid].windows.Add((Get-WindowInfo $w))
+        $null = $byPid[$w.Pid].windows.Add((Get-WindowInfo $w -IncludeIdentity $false))
       }
       $result.apps = @($byPid.Values)
       $result.message = "Found $($byPid.Count) apps / $($wins.Count) windows"
+    }
+
+    'get_app_identity' {
+      $app = [string](Get-PayloadValue 'app')
+      $hwndVal = Get-PayloadValue 'hwnd'
+      $hwnd = if ($hwndVal) { [int64]$hwndVal } else { 0 }
+      $targetPid = [uint32]0
+      if ($hwnd -gt 0 -or $app) {
+        if ($app -match '^\d+$' -and $hwnd -le 0) {
+          $targetPid = [uint32]$app
+          try { $null = [System.Diagnostics.Process]::GetProcessById([int]$targetPid) } catch { throw "app_not_found: pid $targetPid" }
+        } else {
+          $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index')) -Hwnd $hwnd
+          $targetPid = [uint32]$win.Pid
+        }
+      } else {
+        throw 'get_app_identity requires app, pid-as-app, or hwnd'
+      }
+      $verify = Get-PayloadValue 'verify_signature'
+      if ($null -eq $verify) { $verify = $true }
+      $identity = Get-ProcessIdentityFast -ProcessId $targetPid -Detailed $true -VerifySignature ([bool]$verify)
+      $result.identity = $identity
+      $result.pid = $targetPid
+      $result.process_name = $identity.process_name
+      $result.message = "Resolved app identity for pid $targetPid ($($identity.process_name))"
     }
 
     'get_window_state' {
@@ -1432,6 +1458,7 @@ function Invoke-ActionRequest {
       $win = Resolve-TargetWindow -App $app -Index $idx -Hwnd $hwnd
       $rect = [DshWin32]::GetDwmRect($win.Hwnd)
       $pname = Get-ProcessNameFast -ProcessId $win.Pid -Cache $null
+      $identity = Get-ProcessIdentityFast -ProcessId $win.Pid
       $isMin = [DshWin32]::IsIconic($win.Hwnd)
       $sb = New-Object System.Text.StringBuilder(512)
       $null = [DshWin32]::GetWindowText($win.Hwnd, $sb, 512)
@@ -1444,6 +1471,7 @@ function Invoke-ActionRequest {
         title = $title
         pid = $win.Pid
         process_name = $pname
+        app_identity = $identity
         rect = $rectObj
         minimized = [bool]$isMin
         foreground = (-not $isMin -and ([DshWin32]::GetForegroundWindow() -eq $win.Hwnd))
@@ -1453,6 +1481,7 @@ function Invoke-ActionRequest {
       $result.title = $title
       $result.pid = $win.Pid
       $result.process_name = $pname
+      $result.app_identity = $identity
       $result.rect = $rectObj
       $result.minimized = [bool]$isMin
       $result.message = "Window metadata for '$title' (hwnd=$($win.Hwnd.ToInt64()), pid=$($win.Pid))"

@@ -212,6 +212,79 @@ public static class DshWin32
     ref STARTUPINFO lpStartupInfo,
     out PROCESS_INFORMATION lpProcessInformation);
 
+  public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  public static extern bool QueryFullProcessImageNameW(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref uint lpdwSize);
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetApplicationUserModelId(IntPtr hProcess, ref uint applicationUserModelIdLength, StringBuilder applicationUserModelId);
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PROCESS_BASIC_INFORMATION
+  {
+    public IntPtr Reserved1;
+    public IntPtr PebBaseAddress;
+    public IntPtr Reserved2_0;
+    public IntPtr Reserved2_1;
+    public IntPtr UniqueProcessId;
+    public IntPtr InheritedFromUniqueProcessId;
+  }
+
+  [DllImport("ntdll.dll")]
+  public static extern int NtQueryInformationProcess(
+    IntPtr processHandle,
+    int processInformationClass,
+    ref PROCESS_BASIC_INFORMATION processInformation,
+    int processInformationLength,
+    out int returnLength);
+
+  public static string QueryProcessImagePath(uint pid)
+  {
+    IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+    if (h == IntPtr.Zero) return null;
+    try
+    {
+      uint size = 32768;
+      var sb = new StringBuilder((int)size);
+      return QueryFullProcessImageNameW(h, 0, sb, ref size) ? sb.ToString() : null;
+    }
+    finally { CloseHandle(h); }
+  }
+
+  public static string QueryProcessAumid(uint pid)
+  {
+    IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+    if (h == IntPtr.Zero) return null;
+    try
+    {
+      uint size = 0;
+      int rc = GetApplicationUserModelId(h, ref size, null);
+      if (size == 0 || (rc != 0 && rc != 122)) return null;
+      var sb = new StringBuilder((int)size);
+      rc = GetApplicationUserModelId(h, ref size, sb);
+      return rc == 0 ? sb.ToString() : null;
+    }
+    finally { CloseHandle(h); }
+  }
+
+  public static uint QueryParentProcessId(uint pid)
+  {
+    IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+    if (h == IntPtr.Zero) return 0;
+    try
+    {
+      PROCESS_BASIC_INFORMATION info = new PROCESS_BASIC_INFORMATION();
+      int returned;
+      int rc = NtQueryInformationProcess(h, 0, ref info, Marshal.SizeOf(typeof(PROCESS_BASIC_INFORMATION)), out returned);
+      return rc == 0 ? unchecked((uint)info.InheritedFromUniqueProcessId.ToInt64()) : 0;
+    }
+    finally { CloseHandle(h); }
+  }
+
   [DllImport("kernel32.dll", SetLastError = true)]
   public static extern uint GetProcessId(IntPtr hProcess);
 

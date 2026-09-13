@@ -21,6 +21,9 @@ function Get-OverlayEnabled {
 }
 
 if ($null -eq $script:processNameCache) { $script:processNameCache = @{} }
+if ($null -eq $script:processIdentityCache) { $script:processIdentityCache = @{} }
+if ($null -eq $script:fileIdentityCache) { $script:fileIdentityCache = @{} }
+if ($null -eq $script:verifiedPublisherCache) { $script:verifiedPublisherCache = @{} }
 if ($null -eq $script:accessibilityHistory) { $script:accessibilityHistory = @{} }
 if ($null -eq $script:accessibilityRevision) { $script:accessibilityRevision = [int64]0 }
 
@@ -56,14 +59,170 @@ function Get-ProcessNameFast {
   return $name
 }
 
+function Get-FileIdentityFast {
+  param([string]$Path)
+  if (-not $Path) { return @{} }
+  $key = $Path.ToLowerInvariant()
+  if ($script:fileIdentityCache.ContainsKey($key)) { return $script:fileIdentityCache[$key] }
+  $info = [ordered]@{
+    executable_path = $Path
+    file_name = [System.IO.Path]::GetFileName($Path)
+    product_name = ''
+    product_version = ''
+    file_version = ''
+    company_name = ''
+  }
+  try {
+    $vi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+    $info.product_name = [string]$vi.ProductName
+    $info.product_version = [string]$vi.ProductVersion
+    $info.file_version = [string]$vi.FileVersion
+    $info.company_name = [string]$vi.CompanyName
+  } catch { }
+  $script:fileIdentityCache[$key] = $info
+  return $info
+}
+
+function Get-VerifiedPublisherFast {
+  param([string]$Path)
+  if (-not $Path) {
+    return @{ signature_status = 'unavailable'; publisher = ''; signer_subject = ''; signer_thumbprint = '' }
+  }
+  $key = $Path.ToLowerInvariant()
+  if ($script:verifiedPublisherCache.ContainsKey($key)) { return $script:verifiedPublisherCache[$key] }
+  $verified = [ordered]@{
+    signature_status = 'unknown'
+    publisher = ''
+    signer_subject = ''
+    signer_thumbprint = ''
+  }
+  try {
+    $sig = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+    $verified.signature_status = [string]$sig.Status
+    if ($sig.SignerCertificate) {
+      $verified.signer_subject = [string]$sig.SignerCertificate.Subject
+      $verified.signer_thumbprint = [string]$sig.SignerCertificate.Thumbprint
+      try { $verified.publisher = [string]$sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) } catch { }
+    }
+  } catch {
+    $verified.signature_status = 'unavailable'
+  }
+  $script:verifiedPublisherCache[$key] = $verified
+  return $verified
+}
+
+function Get-ProcessIdentityFast {
+  param([uint32]$ProcessId, [bool]$Detailed = $false, [bool]$VerifySignature = $false)
+
+  $name = Get-ProcessNameFast -ProcessId $ProcessId -Cache $null
+  $startTicks = [int64]0
+  if ($script:processNameCache.ContainsKey($ProcessId)) {
+    try { $startTicks = $script:processNameCache[$ProcessId].process.StartTime.ToUniversalTime().Ticks } catch { }
+  }
+
+  $cached = $null
+  if ($script:processIdentityCache.ContainsKey($ProcessId)) {
+    $candidate = $script:processIdentityCache[$ProcessId]
+    if ($candidate.start_ticks -eq $startTicks -and $startTicks -ne 0) { $cached = $candidate }
+    else { $script:processIdentityCache.Remove($ProcessId) }
+  }
+
+  if (-not $cached) {
+    $path = ''
+    try { $path = [string][DshWin32]::QueryProcessImagePath($ProcessId) } catch { }
+    $aumid = ''
+    try { $aumid = [string][DshWin32]::QueryProcessAumid($ProcessId) } catch { }
+    $parentPid = 0
+    try { $parentPid = [uint32][DshWin32]::QueryParentProcessId($ProcessId) } catch { }
+
+    # App-tree identity follows same-process-name ancestors only. This groups
+    # Chromium / Electron worker processes with their app root without collapsing
+    # everything into explorer.exe or a service host, while keeping the hot path
+    # free of repeated parent executable-path queries.
+    $treeRoot = [uint32]$ProcessId
+    $cursor = [uint32]$ProcessId
+    $seen = @{}
+    $selfName = $name
+    for ($depth = 0; $depth -lt 32; $depth++) {
+      if ($seen.ContainsKey($cursor)) { break }
+      $seen[$cursor] = $true
+      $ppid = 0
+      try { $ppid = [uint32][DshWin32]::QueryParentProcessId($cursor) } catch { }
+      if ($ppid -eq 0 -or $ppid -eq $cursor) { break }
+      $parentName = ''
+      try { $parentName = Get-ProcessNameFast -ProcessId $ppid -Cache $null } catch { }
+      if ($selfName -and $parentName -and $parentName -ieq $selfName) {
+        $treeRoot = $ppid
+        $cursor = $ppid
+        continue
+      }
+      break
+    }
+
+    $kind = if ($aumid) { 'packaged' } else { 'win32' }
+    $identityKey = if ($aumid) { 'aumid:' + $aumid } elseif ($path) { 'win32:' + $path.ToLowerInvariant() } else { 'pid:' + [string]$ProcessId }
+    $cached = [ordered]@{
+      kind = $kind
+      identity_key = $identityKey
+      pid = [uint32]$ProcessId
+      process_name = $name
+      executable_path = $path
+      file_name = if ($path) { [System.IO.Path]::GetFileName($path) } else { '' }
+      aumid = $aumid
+      parent_pid = [uint32]$parentPid
+      process_tree_root_pid = [uint32]$treeRoot
+      publisher = ''
+      signature_status = 'not_checked'
+      signer_subject = ''
+      signer_thumbprint = ''
+      details_loaded = $false
+      start_ticks = $startTicks
+    }
+    $script:processIdentityCache[$ProcessId] = $cached
+  }
+
+  if ($Detailed -and -not $cached.details_loaded) {
+    $file = Get-FileIdentityFast -Path ([string]$cached.executable_path)
+    $cached.product_name = [string]$file.product_name
+    $cached.product_version = [string]$file.product_version
+    $cached.file_version = [string]$file.file_version
+    $cached.company_name = [string]$file.company_name
+    $cached.details_loaded = $true
+  }
+
+  if ($VerifySignature -and $cached.executable_path -and $cached.signature_status -eq 'not_checked') {
+    $signature = Get-VerifiedPublisherFast -Path ([string]$cached.executable_path)
+    $cached.signature_status = [string]$signature.signature_status
+    $cached.signer_subject = [string]$signature.signer_subject
+    $cached.signer_thumbprint = [string]$signature.signer_thumbprint
+    if ($signature.publisher) { $cached.publisher = [string]$signature.publisher }
+  }
+
+  # Do not expose the internal PID-reuse discriminator.
+  $copy = [ordered]@{}
+  foreach ($key in $cached.Keys) {
+    if ($key -notin @('start_ticks', 'details_loaded')) { $copy[$key] = $cached[$key] }
+  }
+  return $copy
+}
+
 function Get-CandidateWindows {
   # Shared candidate filtering for Resolve-TargetWindow and list_windows:
   # matches pid / window-title substring / process name, drops off-screen ghosts.
   param([string]$App)
   $wins = @([DshWin32]::EnumWindowsList())
   $filtered = $wins
+  $identityKey = [string](Get-PayloadValue 'identity_key')
 
-  if ($App) {
+  if ($identityKey) {
+    $identities = @{}
+    foreach ($w in $wins) {
+      if (-not $identities.ContainsKey($w.Pid)) {
+        $identities[$w.Pid] = Get-ProcessIdentityFast -ProcessId $w.Pid
+      }
+    }
+    $filtered = @($wins | Where-Object { [string]$identities[$_.Pid].identity_key -ieq $identityKey })
+  } elseif ($App) {
     if ($App -match '^\d+$') {
       $pidMatch = [uint32]$App
       $filtered = @($wins | Where-Object { $_.Pid -eq $pidMatch })
@@ -145,7 +304,16 @@ function Resolve-TargetWindow {
     }
   }
 
-  if ($target) { Assert-Observation -Hwnd $target.Hwnd }
+  if ($target) {
+    $identityKey = [string](Get-PayloadValue 'identity_key')
+    if ($identityKey) {
+      $actualIdentity = Get-ProcessIdentityFast -ProcessId $target.Pid
+      if ([string]$actualIdentity.identity_key -ine $identityKey) {
+        throw 'target_validation_failed: hwnd/app does not match identity_key'
+      }
+    }
+    Assert-Observation -Hwnd $target.Hwnd
+  }
   # If target is iconic (minimized) and action is not read-only inspection (get_window),
   # silently unminimize with SW_SHOWNOACTIVATE so rect and UIA are valid without stealing focus
   if ($null -ne $target -and [DshWin32]::IsIconic($target.Hwnd)) {
@@ -228,9 +396,9 @@ function Parse-KeyChord {
 }
 
 function Get-WindowInfo {
-  param($Win)
+  param($Win, [bool]$IncludeIdentity = $true)
   $app = Get-ProcessNameFast -ProcessId $Win.Pid -Cache $null
-  return @{
+  $info = @{
     id = $Win.Hwnd.ToInt64()
     app = $app
     hwnd = $Win.Hwnd.ToInt64()
@@ -241,6 +409,10 @@ function Get-WindowInfo {
     minimized = [bool]$Win.Minimized
     rect = @{ x = $Win.Rect.Left; y = $Win.Rect.Top; width = ($Win.Rect.Right - $Win.Rect.Left); height = ($Win.Rect.Bottom - $Win.Rect.Top) }
   }
+  if ($IncludeIdentity) {
+    $info.app_identity = Get-ProcessIdentityFast -ProcessId $Win.Pid
+  }
+  return $info
 }
 
 function Safe-Int {
