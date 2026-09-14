@@ -5,6 +5,7 @@ English | [中文](./README.zh.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)
 ![Node](https://img.shields.io/badge/node-%E2%89%A522.12-green)
+[![npm](https://img.shields.io/npm/v/dsh-pc-pilot.svg)](https://www.npmjs.com/package/dsh-pc-pilot)
 
 A **[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin** that gives the model a single `computer` tool to observe and operate the local Windows desktop: an indexed UIA accessibility tree, per-window screenshots, background synthetic-cursor input that never steals focus, and — when a task truly requires it — real SendInput mouse/keyboard control.
 
@@ -43,16 +44,16 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 
 ## Installation
 
-Prerequisite: [npm](https://www.npmjs.com/) (included with Node.js).
+Published on [npm](https://www.npmjs.com/package/dsh-pc-pilot). npm itself is included with Node.js.
 
 ### From the DSH plugin market
 
 Once listed, search for *dsh-pc-pilot* in the market and click install.
 
-### From a GitHub release
+### From npm
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.6/dsh-pc-pilot-0.3.6.tgz
+npm install dsh-pc-pilot
 ```
 
 Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.

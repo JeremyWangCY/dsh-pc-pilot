@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)
 ![Node](https://img.shields.io/badge/node-%E2%89%A522.12-green)
+[![npm](https://img.shields.io/npm/v/dsh-pc-pilot.svg)](https://www.npmjs.com/package/dsh-pc-pilot)
 ![DSH](https://img.shields.io/badge/DeepSeek%20Harness-host%20plugin-blueviolet)
 
 **PC-Pilot（`dsh-pc-pilot`）** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）宿主插件，让 AI 模型通过单一 `computer` 工具观察并操作本地 Windows 桌面。
@@ -54,18 +55,18 @@
 
 ## 安装
 
-前置要求：[npm](https://www.npmjs.com/)（随 Node.js 一起提供）。
+已发布到 [npm](https://www.npmjs.com/package/dsh-pc-pilot)，npm 随 Node.js 一起提供。
 
 ### 方式一：DSH 插件市场（推荐）
 
 收录后，在 DSH 市场中搜索 **dsh-pc-pilot**（或 PC-Pilot），一键安装并按提示重启宿主。
 
-### 方式二：GitHub Release 预构建包
+### 方式二：从 npm 安装
 
 在 DSH profile 目录（`~/.dsh/profiles/web`）内执行：
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.6/dsh-pc-pilot-0.3.6.tgz
+npm install dsh-pc-pilot
 ```
 
 确认 profile 的 `package.json` 中 `dsh.profile.bundles` 数组包含 `"dsh-pc-pilot"`（市场安装会自动加入；手动安装需自行添加），然后重启 DSH 宿主。
