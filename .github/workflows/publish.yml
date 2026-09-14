@@ -1,0 +1,43 @@
+name: Publish npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test-and-publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out release
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $packageVersion = node -p "require('./package.json').version"
+          if ($tagVersion -ne $packageVersion) {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $packageVersion"
+          }
+
+      - name: Test
+        run: npm test
+
+      - name: Publish
+        run: npm publish --access public
