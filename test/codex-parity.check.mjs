@@ -55,10 +55,12 @@ assert.ok(
   'Do-AppState must test PrintWindow flags 2, 0, and 3 in sequence'
 )
 
-// Silent open_app: WindowStyle Minimized (direct at bottom, zero flicker/focus steal)
+// Silent open_app: renderable without activation, then demoted behind active work.
 assert.ok(
-  helperSrc.includes('WindowStyle $style') || helperSrc.includes('WindowStyle Minimized'),
-  'open_app must launch with WindowStyle Minimized for clean, silent background execution'
+  helperSrc.includes('[DshWin32]::LaunchShellSilent') &&
+    helperSrc.includes('[DshWin32]::ShowWindow($resolvedWindow.Hwnd, [DshWin32]::SW_SHOWNOACTIVATE)') &&
+    helperSrc.includes('[DshWin32]::PushWindowToBottom($resolvedWindow.Hwnd)'),
+  'open_app must keep background windows renderable without stealing focus'
 )
 
 // Fast process caching: Get-ProcessNameFast and Process.GetProcessById

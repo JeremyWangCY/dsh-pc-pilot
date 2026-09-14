@@ -50,7 +50,7 @@ Once listed, search for *dsh-pc-pilot* in the market and click install.
 ### From a GitHub release
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.5/dsh-pc-pilot-0.3.5.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.6/dsh-pc-pilot-0.3.6.tgz
 ```
 
 Run this inside the DSH profile (`~/.dsh/profiles/web`), then restart the host.
@@ -93,7 +93,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `drag` | Standard `path` or legacy endpoints; element move (background) or real SendInput drag (foreground) |
 | `screenshot` / `zoom` | Full-display or region capture; crop the latest shot |
 | `switch_display` / `cursor_position` | Default capture display; real cursor location |
-| `launch_app` / `wait` | Launch an app silently in the background (WindowStyle Minimized at the bottom, zero flicker or focus theft); registered Windows activation protocols such as `ms-settings:display` are supported. Delegated app launches return a target only when exactly one new window is safely identifiable; pause between actions |
+| `launch_app` / `wait` | Launch an app behind the active work without activating it; the window stays normally renderable for WGC/UIA instead of remaining minimized. Registered Windows activation protocols such as `ms-settings:display` are supported. Delegated app launches return a target only when exactly one new window is safely identifiable; pause between actions |
 | `activate_window` / `close_window` / `get_window` | Bring window to foreground / request a graceful WM_CLOSE and verify disappearance (otherwise returns `window_close_unconfirmed`) / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
 | `browser_tabs` / `browser_state` / `browser_history` / `browser_back` / `browser_forward` / `browser_wait` | Manage exact tabs, inspect semantic state, navigate history, and wait on page readiness/URL/text without synthetic sleeps |
@@ -106,7 +106,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | Parameter | Default | Notes |
 | --- | --- | --- |
 | `dispatch` | `background` | UIA patterns + window messages; never steals focus. `foreground` uses real SendInput — pick it per task only when the user asked for real control or the essential action has no background path. |
-| `activate` | `false` | `launch_app` only: normal foreground launch. Keep the default minimized background launch unless the user asked to bring the app forward or a modern app requires foreground UIA. |
+| `activate` | `false` | `launch_app` only: normal foreground launch. The default keeps the new window renderable but non-activated and places it behind the active work; use `true` only when the user explicitly wants it brought forward. |
 | `overlay` | `true` | Show the click-through cursor at each action point; it auto-hides 3 s after the last action. |
 | `include_screenshot` | `true` | Capture a per-window PNG in `get_window_state`. |
 | `include_text` | `false` | Include the indexed accessibility tree and document text when an element action is needed. On a window-targeted `wait`, include it in the post-wait observation to check application readiness without a second round-trip. |

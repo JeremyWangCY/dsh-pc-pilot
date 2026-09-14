@@ -63,7 +63,7 @@
 在 DSH profile 目录（`~/.dsh/profiles/web`）内执行：
 
 ```powershell
-npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.5/dsh-pc-pilot-0.3.5.tgz
+npm install https://github.com/JeremyWangCY/dsh-pc-pilot/releases/download/v0.3.6/dsh-pc-pilot-0.3.6.tgz
 ```
 
 确认 profile 的 `package.json` 中 `dsh.profile.bundles` 数组包含 `"dsh-pc-pilot"`（市场安装会自动加入；手动安装需自行添加），然后重启 DSH 宿主。
@@ -131,7 +131,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `drag` | 标准有序路径，或旧式端点；前台真实 SendInput 逐段拖动，后台 UIA 移动返回端点模式 | `path`，或 `from_x`、`from_y`、`to_x`、`to_y` |
 | `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |
 | `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
-| `launch_app` / `wait` | 默认静默后台最小化启动应用；只有用户明确要求带到前台、或现代应用必须在前台暴露 UIA 时才传 `activate: true`。支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回可直接复用的 `window`；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `activate`? / `duration_s` / `wait_for` |
+| `launch_app` / `wait` | 默认在不激活、不抢焦点的前提下把新窗口放到当前工作窗口后层，并保持正常可渲染状态，便于 WGC/UIA 持续后台操作；只有用户明确要求带到前台时才传 `activate: true`。支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回可直接复用的 `window`；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `activate`? / `duration_s` / `wait_for` |
 | `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) 并核验窗口确实消失，否则返回 `window_close_unconfirmed` / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
 | `browser_tabs` / `browser_state` / `browser_history` / `browser_back` / `browser_forward` / `browser_wait` | 精确管理标签页、读取语义状态、历史前进后退，并等待 ready/URL 变化/指定文本 | `browser_endpoint`、`tab_id`?、`include_url`?、`browser_wait_for`? |

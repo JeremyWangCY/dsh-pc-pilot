@@ -1147,25 +1147,33 @@ function Invoke-ActionRequest {
         if ($headless) { $argList += '--headless=new' }
       }
 
-      # Launch silently in background using -WindowStyle Minimized (direct at bottom, zero flicker/focus steal)
-      $style = if (Get-PayloadValue 'activate' -or (Get-Dispatch) -eq 'foreground') { 'Normal' } else { 'Minimized' }
-      $launchDisposition = if ($style -eq 'Normal') { 'foreground' } else { 'background minimized' }
-      # Start-Process supports registered Windows activation protocols such as
-      # ms-settings:display.  They are not executable files, but treating them
-      # as ordinary paths made Settings impossible to open through this action.
-      # A Windows drive path begins with the same "C:" shape as a URI scheme.
-      # Treat it as a protocol only when the colon is not followed by a slash,
-      # so quoted browser executables launch directly instead of through Explorer.
+      # Background launch contract: create a normally renderable window without activating
+      # it.  ShellExecuteEx(SW_SHOWNOACTIVATE) preserves WGC/UIA rendering better than
+      # a minimized window while the universal foreground guard below prevents a
+      # misbehaving app from stealing the user's active work.
+      $foregroundLaunch = ([bool](Get-PayloadValue 'activate') -or (Get-Dispatch) -eq 'foreground')
+      $style = if ($foregroundLaunch) { 'Normal' } else { 'NoActivate' }
+      $launchDisposition = if ($foregroundLaunch) { 'foreground' } else { 'background behind active work' }
+      # Registered Windows activation protocols such as ms-settings:display are
+      # valid launch targets. A Windows drive path begins with the same "C:" shape
+      # as a URI scheme, so only treat it as a protocol when the colon is not
+      # followed by a slash.
       $isActivationProtocol = $filePath -match '^[A-Za-z][A-Za-z0-9+.-]*:(?![\\/])'
-      $proc = if ($isActivationProtocol) {
-        # Passing WindowStyle directly to a URI activation is rejected by some
-        # Windows builds. Explorer is the documented shell router for these
-        # registered protocols and still gives us a bounded launcher process.
-        Start-Process -FilePath explorer.exe -ArgumentList $filePath -WindowStyle $style -PassThru
-      } elseif ($argList.Count -gt 0) {
-        Start-Process -FilePath $filePath -ArgumentList $argList -WindowStyle $style -PassThru
+      if ($foregroundLaunch) {
+        $proc = if ($isActivationProtocol) {
+          Start-Process -FilePath explorer.exe -ArgumentList $filePath -WindowStyle Normal -PassThru
+        } elseif ($argList.Count -gt 0) {
+          Start-Process -FilePath $filePath -ArgumentList $argList -WindowStyle Normal -PassThru
+        } else {
+          Start-Process -FilePath $filePath -WindowStyle Normal -PassThru
+        }
       } else {
-        Start-Process -FilePath $filePath -WindowStyle $style -PassThru
+        $launchArgs = if ($argList.Count -gt 0) { [string]::Join(' ', [string[]]$argList) } else { '' }
+        $launchPid = [DshWin32]::LaunchShellSilent($filePath, $launchArgs)
+        # ShellExecuteEx may successfully route an activation to an existing
+        # process without returning a process handle. Keep pid=0 in that case;
+        # the bounded delegated-window resolver below will identify the actual HWND.
+        $proc = [pscustomobject]@{ Id = [int]$launchPid }
       }
       $result.message = "Started $filePath ($($argList.Count) argument(s)) (launched $style; $launchDisposition)"
       $result.pid = $proc.Id
@@ -1344,16 +1352,51 @@ function Invoke-ActionRequest {
         }
       }
       if ($resolvedWindow) {
+        # Background launches must remain renderable for WGC/UIA while staying out
+        # of the user's way. Show without activation, demote in Z-order, then
+        # refresh the returned geometry so callers never inherit a minimized rect.
+        if (-not $foregroundLaunch) {
+          try {
+            [DshWin32]::ShowWindow($resolvedWindow.Hwnd, [DshWin32]::SW_SHOWNOACTIVATE) | Out-Null
+            $result.background_demoted = [bool]([DshWin32]::PushWindowToBottom($resolvedWindow.Hwnd))
+            $settled = $null
+            for ($settleAttempt = 0; $settleAttempt -lt 16; $settleAttempt++) {
+              Start-Sleep -Milliseconds 25
+              $matches = @([DshWin32]::EnumWindowsList() | Where-Object { $_.Hwnd -eq $resolvedWindow.Hwnd })
+              if ($matches.Count -gt 0) {
+                $candidate = $matches[0]
+                if (-not $candidate.Minimized -and $candidate.Rect.Left -ge -10000 -and $candidate.Rect.Top -ge -10000 -and
+                    $candidate.Rect.Right -gt $candidate.Rect.Left -and $candidate.Rect.Bottom -gt $candidate.Rect.Top) {
+                  $settled = $candidate
+                  break
+                }
+              }
+            }
+            if ($settled) {
+              $resolvedWindow = $settled
+              $result.background_window_ready = $true
+              $result.message += '; background window kept renderable without activation and placed behind active work'
+            } else {
+              $result.background_window_ready = $false
+              $result.needs_observation = $true
+              $result.message += '; background window launch completed but normal renderable geometry was not confirmed yet'
+            }
+          } catch {
+            $result.background_window_ready = $false
+            $result.needs_observation = $true
+            $result.message += '; background window placement could not be confirmed yet'
+          }
+        }
+
         # A launch result is immediately reusable by the next Computer Use
-        # action.  Return the same verified id/app object as get_window instead
-        # of making callers re-discover a window we just identified.
+        # action. Return fresh geometry and the same verified id/app object as
+        # get_window instead of making callers re-discover a window we identified.
         $result.process_name = Get-ProcessNameFast -ProcessId $resolvedWindow.Pid -Cache $null
         $result.window = Get-WindowInfo $resolvedWindow
-        if ($style -eq 'Normal') {
-          # Start-Process WindowStyle Normal does not guarantee foreground
-          # ownership under Windows' focus-stealing rules. The explicit
-          # activate/foreground opt-in must use the same verified activation
-          # path as activate_window before we report the launch result.
+        if ($foregroundLaunch) {
+          # Normal Start-Process does not guarantee foreground ownership under
+          # Windows' focus-stealing rules. The explicit activate/foreground opt-in
+          # uses the same verified activation path as activate_window.
           [DshWin32]::ForceForeground($resolvedWindow.Hwnd)
           $fgHwnd = [DshWin32]::GetForegroundWindow()
           $result.activated = [bool]($fgHwnd -eq $resolvedWindow.Hwnd -or [DshWin32]::IsChild($resolvedWindow.Hwnd, $fgHwnd))

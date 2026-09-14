@@ -1,6 +1,6 @@
 {
   "name": "dsh-pc-pilot",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "PC-Pilot - DeepSeek Harness Windows computer-use host plugin: standard computer-use actions, ordered batches, UIA accessibility targeting, state-bound screenshots and coordinates, background synthetic input, occlusion-immune per-window capture, and real SendInput fallback.",
   "type": "module",
   "main": "lib/index.js",

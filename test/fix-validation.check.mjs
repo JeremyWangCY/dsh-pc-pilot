@@ -30,21 +30,24 @@ assert.ok(
   'DshWin32 must declare SW_SHOWNOACTIVATE = 4 and STARTF_USESHOWWINDOW = 1'
 )
 
-// 1b. launch_app silent launch contracts: WindowStyle Minimized (direct at bottom, zero flicker)
+// 1b. launch_app background launch contracts: renderable + non-activating + demoted.
 const openAppStart = helperSrc.indexOf("'launch_app' {")
 const openAppEnd = helperSrc.indexOf('default {', openAppStart)
 const openAppBody = helperSrc.slice(openAppStart, openAppEnd)
 
 assert.ok(
-  openAppBody.includes('WindowStyle $style') || openAppBody.includes('WindowStyle Minimized'),
-  'launch_app must use WindowStyle Minimized for clean background launch without flicker'
+  openAppBody.includes('[DshWin32]::LaunchShellSilent') && openAppBody.includes("$style = if ($foregroundLaunch) { 'Normal' } else { 'NoActivate' }"),
+  'launch_app must use the SW_SHOWNOACTIVATE-backed silent launcher for default background launches'
 )
-assert.match(
-  openAppBody,
-  /\$style\s*=\s*if\s*\(Get-PayloadValue 'activate'.*?\)\s*\{\s*'Normal'\s*}\s*else\s*\{\s*'Minimized'\s*}/s,
-  'launch_app activate:true must select a normal foreground launch while the default remains minimized'
+assert.ok(
+  openAppBody.includes('[DshWin32]::ShowWindow($resolvedWindow.Hwnd, [DshWin32]::SW_SHOWNOACTIVATE)') &&
+    openAppBody.includes('[DshWin32]::PushWindowToBottom($resolvedWindow.Hwnd)'),
+  'background launch must keep the resolved window renderable without activation and place it behind active work'
 )
-
+assert.ok(
+  openAppBody.includes("$foregroundLaunch = ([bool](Get-PayloadValue 'activate') -or (Get-Dispatch) -eq 'foreground')"),
+  'launch_app activate:true or foreground dispatch must preserve the explicit foreground path'
+)
 // Click safety is exercised through real helper functions and action branches.
 await import('./background-target.check.mjs')
 
