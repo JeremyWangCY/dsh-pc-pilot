@@ -12,7 +12,7 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 
 ## Features
 
-- **One tool, full desktop plus browser** — the desktop surface uses ChatGPT Windows Computer Use names directly: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `drag`, `set_value`, `perform_secondary_action`, and `activate_window`.
+- **One tool, full desktop plus browser** — the desktop surface uses canonical Windows Computer Use names directly: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `drag`, `set_value`, `perform_secondary_action`, and `activate_window`.
 - **Reusable Windows targets** — observations return `window: { id, app }`, which can be supplied unchanged to the next action. Element actions use `element_index`; screenshot coordinates use `scrollX` / `scrollY` and `mouse_button` where applicable.
 - **Background-first input** — actions run via UIA action patterns (Invoke / Toggle / Selection / ExpandCollapse / RangeValue / Transform), then pixel hit-testing, then `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages. The target window is not brought forward and the user's real mouse/keyboard are never hijacked.
 - **State-bound actions** — `get_window_state` returns a `snapshot_id` and `screenshot_id`; element actions must present that snapshot and coordinate actions can bind to the screenshot. Expired, moved, wrong-window, changed-element, or consumed state is rejected instead of falling back to a potentially wrong control.
@@ -24,8 +24,8 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 - **Computer-use loop parity** — send up to 20 ordered actions through `actions`; execution stops at the first failed or uncertain step, and canonical input actions return a fresh post-action observation. Browser mutations include a CDP PNG capture.
 - **Structured safety classification** — obvious consequential target names and sensitive browser fields are classified in the result for future host policy integration; the current PC-Pilot profile does not interpose confirmation.
 - **Occlusion-immune background clicks** — with an `app` specified, coordinate clicks aim at the target window's own UIA tree / hwnd, so a fully covered window can be operated unattended while the user keeps working on top.
-- **Rich mouse vocabulary** — `click` supports OpenAI's `left`, `right`, `wheel` (middle), `back`, and `forward` buttons plus a bounded `click_count`; `scroll` preserves simultaneous `scrollX` / `scrollY` axes; `drag` uses `path`.
-- **OpenAI action spelling compatibility** — `double_click`, `type`, `keypress { keys: [...] }`, and `move` are accepted alongside the Windows canonical `click`, `type_text`, `press_key`, and `mouse_move` actions.
+- **Rich mouse vocabulary** — `click` supports standard `left`, `right`, `wheel` (middle), `back`, and `forward` buttons plus a bounded `click_count`; `scroll` preserves simultaneous `scrollX` / `scrollY` axes; `drag` uses `path`.
+- **Computer-use action spelling compatibility** — `double_click`, `type`, `keypress { keys: [...] }`, and `move` are accepted alongside the Windows canonical `click`, `type_text`, `press_key`, and `mouse_move` actions.
 - **O(1) element lookup** — `get_window_state` caches the UIA element list inside the persistent helper daemon, so `click { element_index }`, `set_value`, `perform_secondary_action`, `select_text`, and `type_text` resolve without a second full-tree traversal.
 - **Occlusion-immune screenshots** — a bundled Windows Graphics Capture bridge first captures the target HWND even when it is covered; `PrintWindow` (multi-flag ladder) is the occlusion-immune fallback. Both ask the window to render its own frame, so a covering window can never leak into the shot; there is deliberately no screen-DC degradation — when neither tier can render, the result is a legible `screenshot_black` error instead of a frame of the occluder. The result reports its capture method and trust level. The bridge is framework-dependent and activates when .NET 8 is available; PrintWindow keeps the plugin usable without it.
 - **Per-task dispatch** — `dispatch: "foreground"` (real SendInput) exists for the cases that genuinely need it (canvas clicks, unsupported drags, apps with no background path); the tool guidance keeps background as the default and asks the model to be explicit when it goes foreground.
@@ -42,6 +42,8 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 - .NET 8 Desktop/Runtime is optional; when present, the bundled WGC bridge provides occlusion-independent native HWND screenshots. Without it, occlusion-immune `PrintWindow` capture keeps the plugin usable.
 
 ## Installation
+
+Prerequisite: [npm](https://www.npmjs.com/) (included with Node.js).
 
 ### From the DSH plugin market
 
@@ -119,7 +121,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `expect` | — | Optional postcondition: verify window state, accessibility change, element value, text, browser URL/text/readiness, or completed download after the action. |
 | `recovery` | `none` | `foreground_once` retries only a conclusively non-executed `background_unavailable` action. Unknown outcomes are never replayed. |
 | `browser_endpoint` / `tab_id` / `browser_element` / `event_cursor` | — | Explicit loopback DevTools endpoint, exact tab id, semantic token, and optional cursor for incremental browser evidence. |
-| `x` / `y` | — | Window-local pixels with `app`/`hwnd`, matching ChatGPT Computer Use; screen coordinates without a target. Set `coordinate_space: "screen"` only for an explicit absolute click. |
+| `x` / `y` | — | Window-local pixels with `app`/`hwnd`, matching the Computer Use coordinate model; screen coordinates without a target. Set `coordinate_space: "screen"` only for an explicit absolute click. |
 | `button` / `click_count` / `keys` | `left` / `1` / — | Mouse button and legacy click repetitions; `keys` supplies standard keypress chords and mouse modifiers. Foreground mouse actions and validated native-window background clicks preserve the modifier state; unsupported background paths report `background_unavailable`. |
 | `actions` | — | Ordered batch of action objects (maximum 20); execution continues for classified consequential targets and reports the safety class. |
 | `display` | primary | 1-based display index for `screenshot` / `switch_display`. |
