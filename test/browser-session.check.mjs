@@ -127,12 +127,27 @@ try {
   assert.ok(typeof s.navigation_id === 'string' && s.navigation_id, 'browser_state exposes navigation identity')
   assert.match(s.observation_id, /^[a-f0-9]{32}$/i, 'browser_state exposes observation identity')
   assert.ok(s.elements.every(item => /^@e[1-9]\d*$/.test(item.ref)), 'browser_state exposes short semantic refs')
-  const semanticObservation = await browserAction('browser_observe', args)
+  const semanticObservation = await browserAction('browser_observe', { ...args, with_screenshot: true })
   assert.notEqual(semanticObservation.observation_id, s.observation_id)
+  assert.ok(semanticObservation.screenshot?.screenshot_id && existsSync(semanticObservation.screenshot.path), 'browser_observe can return a bound viewport screenshot')
   assert.ok(semanticObservation.elements.every(item => item.element === undefined), 'browser_observe omits raw UUID element tokens')
   assert.ok(s.elements.every(item => typeof item.element === 'string' && item.element), 'browser_state preserves raw element tokens for compatibility')
   assert.equal(getRef(semanticObservation, 'Message'), getRef(s, 'Message'), 'same live element keeps its short ref across observations')
   const messageRef = getRef(semanticObservation, 'Message')
+  const observedScreenshotId = semanticObservation.screenshot.screenshot_id
+  const latestPointTarget = semanticObservation.elements.find(item => item.name === 'Latest')
+  assert.ok(latestPointTarget?.rect?.width > 0 && latestPointTarget?.rect?.height > 0, 'fixture exposes coordinate target geometry')
+  await assert.rejects(browserAction('browser_click_point', { ...args, screenshot_id: observedScreenshotId, x: semanticObservation.screenshot.width + 1, y: 1 }), /outside observed screenshot/)
+  const pointClick = await browserAction('browser_click_point', {
+    ...args,
+    screenshot_id: observedScreenshotId,
+    x: latestPointTarget.rect.x + latestPointTarget.rect.width / 2,
+    y: latestPointTarget.rect.y + latestPointTarget.rect.height / 2,
+  })
+  assert.equal(pointClick.ok, true)
+  assert.equal(pointClick.outcome, 'dispatched')
+  assert.ok(pointClick.screenshot?.path && existsSync(pointClick.screenshot.path), 'browser point click returns a fresh screenshot')
+  await eventually(async () => { const value = await state(); get(value, 'Latest clicked'); return true })
   const uploadRef = getRef(semanticObservation, 'Upload fixture')
   await assert.rejects(browserAction('browser_upload', { ...args, element: uploadRef, files: ['relative.txt'] }), /absolute file paths/)
   await assert.rejects(browserAction('browser_upload', { ...args, element: messageRef, files: [uploadFixture] }), /file input/)
@@ -220,6 +235,7 @@ try {
   await click(get(s, 'Change URL'))
   await assert.rejects(browserAction('browser_type', { ...args, element: beforeUrlChange, text: 'must not type' }), /Stale/)
   await assert.rejects(browserAction('browser_type', { ...args, element: beforeUrlRef, text: 'must not type' }), /ref|Stale/i)
+  await assert.rejects(browserAction('browser_click_point', { ...args, screenshot_id: observedScreenshotId, x: 1, y: 1 }), /Stale|wrong-tab/i)
   const urlChanged = await browserAction('browser_wait', { ...args, browser_wait_for: 'url_change', expected_url: originalUrl, browser_wait_timeout_ms: 2000 })
   assert.equal(urlChanged.ok, true)
   assert.ok(urlChanged.url.endsWith('/changed'))

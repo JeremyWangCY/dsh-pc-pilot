@@ -116,7 +116,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 3. Act on the state — element actions include the `snapshot_id` from the same observation. Browser results return a reusable `browser: { endpoint, tab_id }` target that can be passed back unchanged; element actions can use either the raw `browser_element` token or the short `@eN` ref returned by `browser_state` / `browser_observe`.
 4. Observe again only when state is stale/unknown, the target changed, or the next decision needs information you do not already have. Desktop `element_index` values remain bound to the `get_window_state` that produced them.
 
-### Action reference (56 actions)
+### Action reference (57 actions)
 
 | Action | Purpose |
 | --- | --- |
@@ -138,6 +138,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `browser_events` / `browser_downloads` | Cursor-based console/network/lifecycle evidence; Chromium download progress and completed AI-profile files |
 | `browser_shutdown` | Close the entire browser only when this PC-Pilot tool instance launched it |
 | `browser_click` / `browser_type` / `browser_replace` / `browser_key` | Operate a raw token or compact `@eN` ref from the latest state/observe result; stale or changed targets are rejected |
+| `browser_click_point` | Click browser-viewport coordinates only when bound to the exact `screenshot_id` returned by `browser_state` / `browser_observe { with_screenshot: true }`; changed tab/document/URL or stale frames are rejected |
 | `browser_upload` | Select 1–20 explicit absolute local files on an already-observed `<input type=file>` and verify the browser received them; does not submit the surrounding form |
 
 ### Key parameters

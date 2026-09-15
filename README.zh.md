@@ -151,7 +151,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 // 4. 只有状态 stale/unknown、目标变化或下一步缺少信息时再观察；桌面元素 index 仍只对产生它的那次 get_window_state 有效
 ```
 
-### 动作参考（56 个动作）
+### 动作参考（57 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
@@ -176,6 +176,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `browser_events` / `browser_downloads` | 按 `event_cursor` 增量读取 console/network/lifecycle 证据；跟踪 Chromium 下载进度和已落盘文件 | `browser_endpoint`、`tab_id`?、`event_cursor`? |
 | `browser_shutdown` | 仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint` |
 | `browser_click` / `browser_type` / `browser_replace` / `browser_key` | 操作最新 state/observe 返回的原始 token 或紧凑 `@eN` ref；目标过期或身份变化时拒绝 | 优先复用 `browser: { endpoint, tab_id }`，或兼容使用 `browser_endpoint`、`tab_id`；`browser_element` |
+| `browser_click_point` | 仅在绑定 `browser_state` / `browser_observe { with_screenshot: true }` 返回的精确 `screenshot_id` 时点击浏览器 viewport 坐标；tab/document/URL 变化或截图过期就拒绝 | `browser`、`screenshot_id`、`x`、`y` |
 | `browser_upload` | 把 1–20 个明确的绝对本地文件路径选择到已观察到的 `<input type=file>`，并验证浏览器确实收到；不会替 Agent 提交外围表单 | `browser`、`browser_element`、`files` |
 
 #### 动作后验证
