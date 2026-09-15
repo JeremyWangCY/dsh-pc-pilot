@@ -1,4 +1,4 @@
-# dsh computer-use helper (Windows PowerShell 5.1)
+﻿# dsh computer-use helper (Windows PowerShell 5.1)
 # Background synthetic-cursor semantics per cua-driver's Windows recipe:
 #   dispatch=background (default): UIA patterns first, then pixel hit-test, then
 #   WM_CHAR/WM_KEY/WM_MOUSEWHEEL messages. Never steals foreground. Actions that
@@ -1629,7 +1629,7 @@ function Ensure-StatusbarProcess {
 }
 
 function Write-StatusState {
-  # top-center frosted status pill: "PC-Pilot ???" + breathing green dot.
+  # top-center frosted status pill: "PC-Pilot 运行中" + breathing green dot.
   # The pill polls this file: fresh (<=4s) + show -> visible; stale -> hidden.
   param([bool]$Show)
   $dir = Join-Path $env:TEMP 'dsh-cua'
@@ -1920,8 +1920,8 @@ function Invoke-FromPoint {
 
 function Find-TargetHitsAt {
   # One shared scan over the TARGET window's own UIA tree for a screen point:
-  #   best        ? smallest element containing the point (any element)
-  #   bestPattern ? smallest element containing the point that carries an action
+  #   best        — smallest element containing the point (any element)
+  #   bestPattern — smallest element containing the point that carries an action
   #                 pattern (invoke/toggle/selection), plus that method's name
   # BoundingRectangle containment is half-open [X, X+W) x [Y, Y+H).
   # FindAll itself remains unbounded; the caller needs an external process budget.
@@ -2053,7 +2053,7 @@ function Resolve-ValidatedElementHit {
 function Invoke-FromPointInWindow {
   # Window-scoped semantic hit: fire the action pattern of the TARGET window's own
   # UIA tree element under the screen point. Occlusion semantics: with a specified
-  # app, background clicks aim at the target window's tree ? physical occlusion by
+  # app, background clicks aim at the target window's tree — physical occlusion by
   # other windows does not affect delivery, and UIA pattern hits still take priority
   # over bare WM messages. Among matching elements the SMALLEST rectangle wins
   # (deepest control, mirroring Invoke-FromPoint's bottom-up walk). Same return
@@ -2087,7 +2087,7 @@ function Invoke-FromPointInWindow {
 function Find-TargetHwndAt {
   # hwnd that owns the point INSIDE the target window's UIA tree: find the deepest
   # element containing the screen point, then climb to a NativeWindowHandle. NEVER
-  # falls back to screen WindowFromPoint ? with a specified app that would be the
+  # falls back to screen WindowFromPoint — with a specified app that would be the
   # occluding window; falls back to $Win.Hwnd itself. Callers must ScreenToClient
   # against the RETURNED hwnd (Send-BackgroundMouseButton already does).
   param([IntPtr]$Hwnd, [double]$X, [double]$Y, $Win)
@@ -2149,7 +2149,7 @@ function Get-OverlayPoint-Element {
 }
 function Test-BitmapBlank {
   # True when the sampled quadrant points AND the border/title points are all pure
-  # black ? the PrintWindow / screen-DC signature of DirectComposition/UWP/
+  # black — the PrintWindow / screen-DC signature of DirectComposition/UWP/
   # hardware-accelerated frames. Small bitmaps (<= 4px) are never flagged.
   param($bmp, [int]$w, [int]$h)
   if ($w -le 4 -or $h -le 4) { return $false }
@@ -2310,7 +2310,7 @@ function Do-AppState {
       }
     }
     if ($ok) { $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png) }
-    # ponytail: GUID shot files are unbounded ? keep newest 50, self-prunes the backlog too
+    # ponytail: GUID shot files are unbounded — keep newest 50, self-prunes the backlog too
     Get-ChildItem $dir -Filter 'shot-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
     if ($bmp) { $bmp.Dispose() }
     $minimized = [DshWin32]::IsIconic($win.Hwnd)
@@ -2332,7 +2332,7 @@ function Do-AppState {
     } elseif (-not $minimized) {
       # Both occlusion-immune tiers failed. NEVER fall back to a screen-DC copy:
       # CopyFromScreen grabs whatever is visible in the rect, i.e. possibly the
-      # occluding window ? that frame would masquerade as the target.
+      # occluding window — that frame would masquerade as the target.
       $shot = @{
         path = $null
         width = $w
@@ -2594,7 +2594,7 @@ function Split-AppCommand {
     }
   }
   # bare executable name without a path/extension: Start-Process fails on this machine's
-  # restricted lookup ("system cannot find all information required") ? resolve the real
+  # restricted lookup ("system cannot find all information required") — resolve the real
   # path on PATH and retry with the .exe suffix so `open_app { name: "notepad" }` works
   if (-not (Test-Path $filePath) -and $filePath -notmatch '[\\/\.]') {
     try {
@@ -2764,7 +2764,7 @@ function Invoke-MouseButtonAction {
   if ($dispatch -eq 'background') {
     $h = [IntPtr]::Zero
     if ($win) {
-      # app-scoped: target-window tree lookup ? occluding windows can never intercept
+      # app-scoped: target-window tree lookup — occluding windows can never intercept
       # the delivery (old code preferred the screen-level hwnd, i.e. the occluder)
       $h = Find-TargetHwndAt -Hwnd $win.Hwnd -X $sx -Y $sy -Win $win
     } else {
@@ -2993,7 +2993,7 @@ function Invoke-ActionRequest {
             $result.hit_name = if ($el) { $el.Current.Name } else { $null }
             $result.message = "Background modifier click sent to hwnd $($h.ToInt64())"
           } elseif ($win) {
-            # app-scoped: aim at the TARGET window's own tree ? physical occlusion by
+            # app-scoped: aim at the TARGET window's own tree — physical occlusion by
             # other windows does not affect delivery; UIA pattern hits still take
             # priority over bare WM messages
             $hit = Invoke-FromPointInWindow -Hwnd $win.Hwnd -X $sx -Y $sy -ExpectedName $expectedName -Element $el
@@ -3740,7 +3740,7 @@ function Invoke-ActionRequest {
           Select-Object -ExpandProperty ProcessId)
         $preferred = @([DshWin32]::EnumWindowsList() | Where-Object {
           ($ownedPids -contains $_.Pid) -and
-          $_.Title -notmatch '(?i)restore|recovery|????|????' -and
+          $_.Title -notmatch '(?i)restore|recovery|恢复页面|恢复会话' -and
           ($_.Rect.Right - $_.Rect.Left) -ge 600 -and ($_.Rect.Bottom - $_.Rect.Top) -ge 400
         } | Sort-Object @{Expression={($_.Rect.Right-$_.Rect.Left)*($_.Rect.Bottom-$_.Rect.Top)};Descending=$true})
         if ($preferred.Count -gt 0) { $wins = $preferred }
@@ -3787,7 +3787,7 @@ function Invoke-ActionRequest {
             # (for example a script-hosted WinForms app), so reject only its
             # recognizable console window rather than every PowerShell process.
             $candidateIsConsoleHost = $candidateProcess -in @('cmd', 'WindowsTerminal', 'OpenConsole', 'conhost') -or (
-              ($candidateProcess -in @('powershell', 'pwsh')) -and $candidateTitle -match '(?i)^(Windows PowerShell|PowerShell|???:|Administrator:)'
+              ($candidateProcess -in @('powershell', 'pwsh')) -and $candidateTitle -match '(?i)^(Windows PowerShell|PowerShell|管理员:|Administrator:)'
             )
             ($preLaunchHwnds -notcontains $_.Hwnd.ToInt64()) -and $_.Title -and
             -not $_.Minimized -and ($_.Rect.Right - $_.Rect.Left) -ge 50 -and
@@ -3878,7 +3878,7 @@ function Invoke-ActionRequest {
             $result.error_code = 'foreground_activation_unconfirmed'
             $result.needs_observation = $true
             $result.launch_succeeded = $true
-            $result.message += '; foreground activation could not be confirmed, but the app launch completed?do not retry launch; observe the returned window'
+            $result.message += '; foreground activation could not be confirmed, but the app launch completed—do not retry launch; observe the returned window'
           }
         }
       }
@@ -4076,7 +4076,7 @@ function Invoke-ActionRequest {
           $result.message = "Accessibility condition '$waitFor' satisfied after $($result.duration_s)s ($status, $count element(s))"
         }
       } else {
-        # Start-Sleep -Seconds is int-typed in PS 5.1 ? use Milliseconds so fractional durations work
+        # Start-Sleep -Seconds is int-typed in PS 5.1 — use Milliseconds so fractional durations work
         Start-Sleep -Milliseconds ([int]($dur * 1000))
         $result.duration_s = $dur
         $result.message = "Waited $dur second(s)"
@@ -4122,7 +4122,7 @@ function Invoke-ActionRequest {
       $path = Join-Path $dir ("disp-{0}.png" -f ([guid]::NewGuid().ToString('N')))
       $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
       $bmp.Dispose()
-      # ponytail: GUID disp files are unbounded ? keep newest 50, same policy as shot-*.png
+      # ponytail: GUID disp files are unbounded — keep newest 50, same policy as shot-*.png
       Get-ChildItem $dir -Filter 'disp-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
       $result.path = $path
       $result.screenshot_id = [guid]::NewGuid().ToString('N')
@@ -4177,7 +4177,7 @@ function Invoke-ActionRequest {
       $outPath = Join-Path $dir ("zoom-{0}.png" -f ([guid]::NewGuid().ToString('N')))
       $crop.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Png)
       $crop.Dispose()
-      # ponytail: GUID zoom files are unbounded ? keep newest 50
+      # ponytail: GUID zoom files are unbounded — keep newest 50
       Get-ChildItem $dir -Filter 'zoom-*.png' -ea SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -Skip 50 | Remove-Item -Force -ea SilentlyContinue
       $result.path = $outPath
       $result.width = $iw
@@ -4407,7 +4407,7 @@ function Write-DaemonReply {
 if ($Server) {
   # keep the JSONL stdout stream clean: silence Write-Host/information records
   $InformationPreference = 'SilentlyContinue'
-  # Simple loop: blocking ReadLine -> dispatch -> reply. No idle exit here ?
+  # Simple loop: blocking ReadLine -> dispatch -> reply. No idle exit here —
   # Console.In.Peek() blocks on a redirected pipe and the old async-read poll
   # was proven to never run the idle check (judge: helper alive at 330s), so
   # idle lifecycle is owned by the node side instead. Exit on
@@ -4439,7 +4439,7 @@ if ($Server) {
 
 # ---------------------------------------------------------------- one-shot fallback (no -Server)
 # Guard for dot-sourcing (tests load this file to reuse DshWin32) AND for stray
-# no-arg runs: without an action there is nothing to run ? exit BEFORE touching
+# no-arg runs: without an action there is nothing to run — exit BEFORE touching
 # stdin, so a redirected-but-open stdin can never block us at ReadToEnd.
 if (-not $Server -and -not $Action) { exit 0 }
 
