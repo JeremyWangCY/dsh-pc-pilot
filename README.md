@@ -6,6 +6,7 @@ English | [中文](./README.zh.md)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)
 ![Node](https://img.shields.io/badge/node-%E2%89%A522.12-green)
 [![npm](https://img.shields.io/npm/v/dsh-pc-pilot.svg)](https://www.npmjs.com/package/dsh-pc-pilot)
+[![CI](https://github.com/JeremyWangCY/dsh-pc-pilot/actions/workflows/ci.yml/badge.svg)](https://github.com/JeremyWangCY/dsh-pc-pilot/actions/workflows/ci.yml)
 
 A **[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin** that gives the model a single `computer` tool to observe and operate the local Windows desktop: an indexed UIA accessibility tree, per-window screenshots, background synthetic-cursor input that never steals focus, and — when a task truly requires it — real SendInput mouse/keyboard control.
 

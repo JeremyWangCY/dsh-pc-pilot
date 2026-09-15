@@ -6,6 +6,7 @@
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)
 ![Node](https://img.shields.io/badge/node-%E2%89%A522.12-green)
 [![npm](https://img.shields.io/npm/v/dsh-pc-pilot.svg)](https://www.npmjs.com/package/dsh-pc-pilot)
+[![CI](https://github.com/JeremyWangCY/dsh-pc-pilot/actions/workflows/ci.yml/badge.svg)](https://github.com/JeremyWangCY/dsh-pc-pilot/actions/workflows/ci.yml)
 ![DSH](https://img.shields.io/badge/DeepSeek%20Harness-host%20plugin-blueviolet)
 
 ## 运行边界

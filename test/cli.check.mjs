@@ -7,7 +7,7 @@ assert.deepEqual(
   {
     command: 'act',
     action: 'click',
-    options: { json: true, probe: false, stdin: false, payloadText: '{"x":10,"y":20}' },
+    options: { json: true, probe: false, stdin: false, version: false, payloadText: '{"x":10,"y":20}' },
     extra: [],
   }
 )
