@@ -20,6 +20,8 @@ const provider = createBrowserProvider({
 const runtime = createPcPilotRuntime({ browserProvider: provider })
 try {
   assert.equal(runtime.status().providers.browser, 'test-browser-provider')
+  assert.throws(() => runtime.bind(null), /bound defaults must be an object/)
+  assert.throws(() => runtime.bind([]), /bound defaults must be an object/)
 
   const browser = { endpoint: 'ws://127.0.0.1:9222/devtools/browser/test' }
   const result = await runtime.act('browser_tabs', {
@@ -34,16 +36,25 @@ try {
   assert.equal(calls[0].args.future_field, 'kept')
   assert.deepEqual(result.browser, browser)
 
-  const observed = await runtime.act('browser_observe', {
-    browser: { ...browser, tab_id: 'tab-1' },
-  })
+  const boundTarget = { browser: { ...browser, tab_id: 'tab-1' } }
+  const page = runtime.bind(boundTarget)
+  boundTarget.browser.tab_id = 'mutated-after-bind'
+  const observed = await page.act('browser_observe')
   assert.equal(calls.at(-1).args.browser_endpoint, browser.endpoint)
   assert.equal(calls.at(-1).args.tab_id, 'tab-1')
   assert.deepEqual(observed.browser, { ...browser, tab_id: 'tab-1' })
 
+  await page.act('browser_read', { browser: { tab_id: 'tab-call' } })
+  assert.equal(calls.at(-1).args.browser_endpoint, browser.endpoint, 'call override preserves bound endpoint')
+  assert.equal(calls.at(-1).args.tab_id, 'tab-call', 'call payload overrides bound tab')
+
+  const rebound = page.bind({ browser: { tab_id: 'tab-2' } })
+  await rebound.act('browser_read')
+  assert.equal(calls.at(-1).args.browser_endpoint, browser.endpoint, 'nested bind preserves endpoint')
+  assert.equal(calls.at(-1).args.tab_id, 'tab-2', 'nested bind can replace only the tab')
+
   const batchStart = calls.length
-  const batch = await runtime.run({
-    browser: { ...browser, tab_id: 'tab-1' },
+  const batch = await page.run({
     actions: [
       { action: 'browser_observe' },
       { action: 'browser_read' },

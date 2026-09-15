@@ -101,10 +101,18 @@ import { createPcPilotRuntime } from 'dsh-pc-pilot/runtime'
 const pc = createPcPilotRuntime()
 const apps = await pc.act('list_apps')
 const batch = await pc.run({ actions: [{ action: 'wait', seconds: 1 }] })
+
+// 只是可选便利层：绑定可复用 target，不创建隐藏 session。
+const launched = await pc.act('launch_app', { name: 'msedge.exe', headless: true })
+const opened = await pc.act('browser_open', { browser: launched.browser, url: 'https://example.com' })
+const page = pc.bind({ browser: opened.browser })
+const observed = await page.act('browser_observe')
+await page.act('browser_click', { browser_element: observed.elements[0].ref })
+
 pc.close()
 ```
 
-Runtime 原样返回 core 的 outcome。尤其是 `outcome: "unknown"`，它代表 Agent 应先检查当前状态，而不是由 CLI 擅自重放动作。
+Runtime 原样返回 core 的 outcome。尤其是 `outcome: "unknown"`，它代表 Agent 应先检查当前状态，而不是由 CLI 擅自重放动作。`runtime.bind(defaults)` 只是浅层 target/default 绑定便利层：单次调用字段优先，嵌套 `window` / `browser` target 会合并，不会背着 Agent 增加 lifecycle、导航、观察或重试。
 
 Browser 后端同样只是一个可注入的轻量 provider，而不是第二套策略层。默认 provider 继续使用当前 persistent CDP session；其他后端只需实现 `execute(action, args, signal)`。这样以后可以接 BrowserSkill-compatible backend，但不会强迫所有 Agent 遵循同一套固定工作流。
 

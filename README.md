@@ -88,10 +88,18 @@ import { createPcPilotRuntime } from 'dsh-pc-pilot/runtime'
 const pc = createPcPilotRuntime()
 const apps = await pc.act('list_apps')
 const batch = await pc.run({ actions: [{ action: 'wait', seconds: 1 }] })
+
+// Optional convenience only: bind a reusable target without creating a hidden session.
+const launched = await pc.act('launch_app', { name: 'msedge.exe', headless: true })
+const opened = await pc.act('browser_open', { browser: launched.browser, url: 'https://example.com' })
+const page = pc.bind({ browser: opened.browser })
+const observed = await page.act('browser_observe')
+await page.act('browser_click', { browser_element: observed.elements[0].ref })
+
 pc.close()
 ```
 
-The runtime returns the core outcome unchanged. In particular, `outcome: "unknown"` is evidence for the agent to inspect state; the CLI does not turn it into an automatic replay.
+The runtime returns the core outcome unchanged. In particular, `outcome: "unknown"` is evidence for the agent to inspect state; the CLI does not turn it into an automatic replay. `runtime.bind(defaults)` is only a shallow target/default binding convenience: per-call fields win, nested `window` / `browser` targets merge, and no lifecycle, navigation, observation, or retry is added behind the agent's back.
 
 The browser backend is also a small injectable provider rather than a second policy layer. The default provider keeps the current persistent CDP session implementation; alternate providers only need an `execute(action, args, signal)` function. This leaves room for a BrowserSkill-compatible backend without forcing its workflow onto every agent.
 
