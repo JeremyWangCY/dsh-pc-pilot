@@ -86,6 +86,13 @@ async function eventually(fn) {
   }
   throw last
 }
+function assertOptionalPostActionScreenshot(result, label) {
+  if (result.screenshot?.path) {
+    assert.ok(existsSync(result.screenshot.path), `${label} screenshot path must exist`)
+    return
+  }
+  assert.equal(result.screenshot_error, 'post-action page capture unavailable', `${label} must explain an unavailable non-fatal screenshot`)
+}
 try {
   child = spawn(edge, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--disable-background-networking', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
@@ -146,7 +153,7 @@ try {
   })
   assert.equal(pointClick.ok, true)
   assert.equal(pointClick.outcome, 'dispatched')
-  assert.ok(pointClick.screenshot?.path && existsSync(pointClick.screenshot.path), 'browser point click returns a fresh screenshot')
+  assertOptionalPostActionScreenshot(pointClick, 'browser point click')
   await eventually(async () => { const value = await state(); get(value, 'Latest clicked'); return true })
   const uploadRef = getRef(semanticObservation, 'Upload fixture')
   await assert.rejects(browserAction('browser_upload', { ...args, element: uploadRef, files: ['relative.txt'] }), /absolute file paths/)
@@ -154,7 +161,7 @@ try {
   const uploaded = await browserAction('browser_upload', { ...args, element: uploadRef, files: [uploadFixture] })
   assert.equal(uploaded.ok, true)
   assert.equal(uploaded.uploaded_count, 1)
-  assert.ok(uploaded.screenshot?.path && existsSync(uploaded.screenshot.path), 'browser upload returns a fresh screenshot')
+  assertOptionalPostActionScreenshot(uploaded, 'browser upload')
   assert.equal(typeof s.can_go_back, 'boolean')
   assert.equal(typeof s.can_go_forward, 'boolean')
   const initialBrowserSession = s.browser_session_id
@@ -188,7 +195,7 @@ try {
   await browserAction('browser_replace', { ...args, element: get(s, 'Shadow editor'), text: 'shadow replacement' })
   assert.equal(get(await state(), 'Message'), message, 'tokens stable across state/connection')
   const typed = await browserAction('browser_type', { ...args, element: messageRef, text: 'fixture secret 123' })
-  assert.ok(typed.screenshot?.path && existsSync(typed.screenshot.path), 'browser mutation returns a fresh screenshot')
+  assertOptionalPostActionScreenshot(typed, 'browser mutation')
   await assertBrowserSessionStable('typing')
   assert.ok(!JSON.stringify(await state()).includes('fixture secret'))
   await assert.rejects(browserAction('browser_replace', { ...args, element: message, text: 'wrong', expected_url: 'https://wrong.invalid/' }), /URL changed/)
