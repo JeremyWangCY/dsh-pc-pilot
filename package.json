@@ -1,11 +1,11 @@
 {
   "name": "dsh-pc-pilot",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "PC-Pilot - lightweight Windows + Chromium computer-use runtime, CLI, and DeepSeek Harness host plugin.",
   "type": "module",
   "main": "lib/index.js",
   "bin": {
-    "pc-pilot": "./bin/pc-pilot.js"
+    "pc-pilot": "bin/pc-pilot.js"
   },
   "exports": {
     ".": "./lib/index.js",

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 
 const isWindows = process.platform === 'win32'
 const packed = JSON.parse(execFileSync(
@@ -11,7 +12,9 @@ const packed = JSON.parse(execFileSync(
   }
 ))
 const paths = new Set(packed[0]?.files?.map((file) => file.path) || [])
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
+assert.equal(packageJson.bin?.['pc-pilot'], 'bin/pc-pilot.js', 'published manifest must retain the pc-pilot CLI bin mapping')
 assert.ok(paths.has('lib/wgc/dsh-pc-pilot-wgc.exe'), 'runtime WGC executable must be packaged')
 assert.ok(paths.has('bin/pc-pilot.js'), 'standalone pc-pilot CLI must be packaged')
 assert.ok(paths.has('lib/runtime.js'), 'standalone runtime API must be packaged')
