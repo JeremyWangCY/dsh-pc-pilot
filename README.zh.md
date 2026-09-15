@@ -8,6 +8,12 @@
 [![npm](https://img.shields.io/npm/v/dsh-pc-pilot.svg)](https://www.npmjs.com/package/dsh-pc-pilot)
 ![DSH](https://img.shields.io/badge/DeepSeek%20Harness-host%20plugin-blueviolet)
 
+## 运行边界
+
+**PC-Pilot 只面向同一交互式 Windows 会话：用户正常工作，AI 尽量走不抢焦点的后台路径。** 浏览器优先 CDP；桌面优先 UIA、目标窗口消息、WGC / PrintWindow。虚拟机、第二桌面或隐藏的另一套 Windows 会话不属于 PC-Pilot 的架构。某个应用如果确实依赖真实前台 SendInput，就应准确返回后台不支持，而不是假装能保证用户与 AI 的键鼠完全独立。
+
+优化优先级：**浏览器批量/局部观察 → UIA 缓存与能力路由 → WGC 会话复用 → 条件批处理 → 高频软件专用适配。** 截图能力和后台输入能力分别验证：能稳定抓到窗口画面，不代表这个应用也能可靠接收后台输入。
+
 **PC-Pilot（`dsh-pc-pilot`）** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）宿主插件，让 AI 模型通过单一 `computer` 工具观察并操作本地 Windows 桌面。
 
 它把三件事整合进一个工具：

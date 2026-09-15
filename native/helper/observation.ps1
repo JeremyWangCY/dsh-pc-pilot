@@ -23,6 +23,7 @@ function Get-OverlayEnabled {
 if ($null -eq $script:processNameCache) { $script:processNameCache = @{} }
 if ($null -eq $script:processIdentityCache) { $script:processIdentityCache = @{} }
 if ($null -eq $script:fileIdentityCache) { $script:fileIdentityCache = @{} }
+if ($null -eq $script:windowBackgroundCapabilities) { $script:windowBackgroundCapabilities = @{} }
 if ($null -eq $script:verifiedPublisherCache) { $script:verifiedPublisherCache = @{} }
 if ($null -eq $script:accessibilityHistory) { $script:accessibilityHistory = @{} }
 if ($null -eq $script:accessibilityRevision) { $script:accessibilityRevision = [int64]0 }
@@ -528,6 +529,7 @@ function Get-AccessibilityTree {
   $script:cachedTreeHwnd = $Hwnd
   $script:cachedElements = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
   $script:cachedIdentities = New-Object System.Collections.Generic.List[string]
+  $windowCapabilityMap = @{}
   if ($null -eq $WinRect -and $Hwnd -ne [IntPtr]::Zero) {
     try { $WinRect = [DshWin32]::GetRect($Hwnd) } catch { }
   }
@@ -539,7 +541,8 @@ function Get-AccessibilityTree {
     if ($count -ge $MaxElements) { break }
     $count++
     $script:cachedElements.Add($el)
-    $script:cachedIdentities.Add((Get-ElementIdentity $el))
+    $elementIdentity = Get-ElementIdentity $el
+    $script:cachedIdentities.Add($elementIdentity)
     $stableId = Get-StableElementId $el
     $cur = $el.Current
     $rect = $cur.BoundingRectangle
@@ -555,9 +558,26 @@ function Get-AccessibilityTree {
     $ip = $null
     if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) { $invoke = $true }
     $selected = $false
+    $selection = $false
     $selectionItem = $null
     if ($el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionItem)) {
+      $selection = $true
       try { $selected = [bool]$selectionItem.Current.IsSelected } catch { }
+    }
+    $toggle = $false; $togglePattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$togglePattern)) { $toggle = $true }
+    $scroll = $false; $scrollPattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scrollPattern)) { $scroll = $true }
+    $rangeValue = $false; $rangeValuePattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rangeValuePattern)) { $rangeValue = $true }
+    $textPatternSupported = $false; $textPattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$textPattern)) { $textPatternSupported = $true }
+    $expandCollapse = $false; $expandCollapsePattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) { $expandCollapse = $true }
+    $windowCapabilityMap[$elementIdentity] = @{
+      invoke = $invoke; value = ($null -ne $vp); selection = $selection; toggle = $toggle;
+      scroll = $scroll; range_value = $rangeValue; text = $textPatternSupported;
+      expand_collapse = $expandCollapse; native_hwnd = [int64]$cur.NativeWindowHandle
     }
     $relX = if ($null -ne $WinRect) { Safe-Int ($rect.X - $WinRect.Left) } else { Safe-Int $rect.X }
     $relY = if ($null -ne $WinRect) { Safe-Int ($rect.Y - $WinRect.Top) } else { Safe-Int $rect.Y }
@@ -577,6 +597,12 @@ function Get-AccessibilityTree {
       screen_rect = @{ x = (Safe-Int $rect.X); y = (Safe-Int $rect.Y); width = (Safe-Int $rect.Width); height = (Safe-Int $rect.Height) }
     }
     $out.Add($item)
+  }
+  $windowKey = [string]$Hwnd.ToInt64()
+  $script:windowBackgroundCapabilities[$windowKey] = $windowCapabilityMap
+  while ($script:windowBackgroundCapabilities.Count -gt 32) {
+    $oldestKey = @($script:windowBackgroundCapabilities.Keys)[0]
+    $script:windowBackgroundCapabilities.Remove($oldestKey)
   }
   # The comma keeps the List intact: a bare `return $out` unrolls a single-item
   # list into a scalar, so a one-element window would report elements as an object

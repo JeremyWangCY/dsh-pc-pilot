@@ -1,3 +1,42 @@
+function Get-BackgroundCapabilityRecord {
+  param([IntPtr]$Hwnd, $Element)
+  if ($null -eq $Element -or $Hwnd -eq [IntPtr]::Zero -or $null -eq $script:windowBackgroundCapabilities) { return $null }
+  try {
+    $windowKey = [string]$Hwnd.ToInt64()
+    if (-not $script:windowBackgroundCapabilities.ContainsKey($windowKey)) { return $null }
+    $identity = Get-ElementIdentity $Element
+    $map = $script:windowBackgroundCapabilities[$windowKey]
+    if ($null -eq $map -or -not $map.ContainsKey($identity)) { return $null }
+    return $map[$identity]
+  } catch { return $null }
+}
+
+function Set-BackgroundCapability {
+  param([IntPtr]$Hwnd, $Element, [string]$Name, [bool]$Supported)
+  if ($null -eq $Element -or $Hwnd -eq [IntPtr]::Zero -or [string]::IsNullOrWhiteSpace($Name)) { return }
+  try {
+    $windowKey = [string]$Hwnd.ToInt64()
+    if (-not $script:windowBackgroundCapabilities.ContainsKey($windowKey)) { $script:windowBackgroundCapabilities[$windowKey] = @{} }
+    $map = $script:windowBackgroundCapabilities[$windowKey]
+    $identity = Get-ElementIdentity $Element
+    if (-not $map.ContainsKey($identity)) { $map[$identity] = @{} }
+    $map[$identity][$Name] = $Supported
+  } catch { }
+}
+
+function Resolve-BackgroundPattern {
+  param([IntPtr]$Hwnd, $Element, [string]$Name, $Pattern)
+  $cap = Get-BackgroundCapabilityRecord -Hwnd $Hwnd -Element $Element
+  if ($cap -and $cap.ContainsKey($Name) -and -not [bool]$cap[$Name]) {
+    return @{ supported = $false; cached = $true; pattern = $null }
+  }
+  $resolved = $null
+  $supported = $false
+  try { $supported = $Element.TryGetCurrentPattern($Pattern, [ref]$resolved) } catch { $supported = $false }
+  Set-BackgroundCapability -Hwnd $Hwnd -Element $Element -Name $Name -Supported $supported
+  return @{ supported = $supported; cached = $false; pattern = $resolved }
+}
+
 function Test-ElementInWindow {
   param(
     [System.Windows.Automation.AutomationElement]$Element,
@@ -412,12 +451,27 @@ function Invoke-FromPointInWindow {
     if ($null -ne $best) {
       $method = $null
       $bp = $null
-      if ($best.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$bp)) { $method = 'invoke' }
-      elseif ($best.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$bp)) { $method = 'toggle' }
-      elseif ($best.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$bp)) { $method = 'selection' }
+      $cap = Get-BackgroundCapabilityRecord -Hwnd $Hwnd -Element $best
+      $knownNoAction = ($cap -and $cap.ContainsKey('invoke') -and $cap.ContainsKey('toggle') -and $cap.ContainsKey('selection') -and
+        -not [bool]$cap.invoke -and -not [bool]$cap.toggle -and -not [bool]$cap.selection)
+      if ($knownNoAction) { throw 'background_unavailable: capability cache says target has no UIA invoke/toggle/selection path' }
+      if (-not $cap -or -not $cap.ContainsKey('invoke') -or [bool]$cap.invoke) {
+        if ($best.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$bp)) { $method = 'invoke'; Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'invoke' -Supported $true }
+        else { Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'invoke' -Supported $false }
+      }
+      if ($null -eq $method -and (-not $cap -or -not $cap.ContainsKey('toggle') -or [bool]$cap.toggle)) {
+        $bp = $null
+        if ($best.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$bp)) { $method = 'toggle'; Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'toggle' -Supported $true }
+        else { Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'toggle' -Supported $false }
+      }
+      if ($null -eq $method -and (-not $cap -or -not $cap.ContainsKey('selection') -or [bool]$cap.selection)) {
+        $bp = $null
+        if ($best.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$bp)) { $method = 'selection'; Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'selection' -Supported $true }
+        else { Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'selection' -Supported $false }
+      }
       # Revalidate after pattern lookup; never catch an action exception and retry.
       Assert-ClickTarget -Element $best -Hwnd $Hwnd -X $X -Y $Y -ExpectedName $ExpectedName
-      if ($null -eq $method) { throw 'background_unavailable: target has no verified UIA action pattern' }
+      if ($null -eq $method) { throw 'background_unavailable: target has no verified UIA action pattern; unsupported paths were cached' }
       $name = $best.Current.Name
       $rect = $best.Current.BoundingRectangle
       if ($method -eq 'invoke') { $bp.Invoke() }

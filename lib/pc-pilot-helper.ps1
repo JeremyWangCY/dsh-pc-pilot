@@ -854,6 +854,7 @@ function Get-OverlayEnabled {
 if ($null -eq $script:processNameCache) { $script:processNameCache = @{} }
 if ($null -eq $script:processIdentityCache) { $script:processIdentityCache = @{} }
 if ($null -eq $script:fileIdentityCache) { $script:fileIdentityCache = @{} }
+if ($null -eq $script:windowBackgroundCapabilities) { $script:windowBackgroundCapabilities = @{} }
 if ($null -eq $script:verifiedPublisherCache) { $script:verifiedPublisherCache = @{} }
 if ($null -eq $script:accessibilityHistory) { $script:accessibilityHistory = @{} }
 if ($null -eq $script:accessibilityRevision) { $script:accessibilityRevision = [int64]0 }
@@ -1359,6 +1360,7 @@ function Get-AccessibilityTree {
   $script:cachedTreeHwnd = $Hwnd
   $script:cachedElements = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
   $script:cachedIdentities = New-Object System.Collections.Generic.List[string]
+  $windowCapabilityMap = @{}
   if ($null -eq $WinRect -and $Hwnd -ne [IntPtr]::Zero) {
     try { $WinRect = [DshWin32]::GetRect($Hwnd) } catch { }
   }
@@ -1370,7 +1372,8 @@ function Get-AccessibilityTree {
     if ($count -ge $MaxElements) { break }
     $count++
     $script:cachedElements.Add($el)
-    $script:cachedIdentities.Add((Get-ElementIdentity $el))
+    $elementIdentity = Get-ElementIdentity $el
+    $script:cachedIdentities.Add($elementIdentity)
     $stableId = Get-StableElementId $el
     $cur = $el.Current
     $rect = $cur.BoundingRectangle
@@ -1386,9 +1389,26 @@ function Get-AccessibilityTree {
     $ip = $null
     if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) { $invoke = $true }
     $selected = $false
+    $selection = $false
     $selectionItem = $null
     if ($el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selectionItem)) {
+      $selection = $true
       try { $selected = [bool]$selectionItem.Current.IsSelected } catch { }
+    }
+    $toggle = $false; $togglePattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$togglePattern)) { $toggle = $true }
+    $scroll = $false; $scrollPattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scrollPattern)) { $scroll = $true }
+    $rangeValue = $false; $rangeValuePattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rangeValuePattern)) { $rangeValue = $true }
+    $textPatternSupported = $false; $textPattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$textPattern)) { $textPatternSupported = $true }
+    $expandCollapse = $false; $expandCollapsePattern = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expandCollapsePattern)) { $expandCollapse = $true }
+    $windowCapabilityMap[$elementIdentity] = @{
+      invoke = $invoke; value = ($null -ne $vp); selection = $selection; toggle = $toggle;
+      scroll = $scroll; range_value = $rangeValue; text = $textPatternSupported;
+      expand_collapse = $expandCollapse; native_hwnd = [int64]$cur.NativeWindowHandle
     }
     $relX = if ($null -ne $WinRect) { Safe-Int ($rect.X - $WinRect.Left) } else { Safe-Int $rect.X }
     $relY = if ($null -ne $WinRect) { Safe-Int ($rect.Y - $WinRect.Top) } else { Safe-Int $rect.Y }
@@ -1408,6 +1428,12 @@ function Get-AccessibilityTree {
       screen_rect = @{ x = (Safe-Int $rect.X); y = (Safe-Int $rect.Y); width = (Safe-Int $rect.Width); height = (Safe-Int $rect.Height) }
     }
     $out.Add($item)
+  }
+  $windowKey = [string]$Hwnd.ToInt64()
+  $script:windowBackgroundCapabilities[$windowKey] = $windowCapabilityMap
+  while ($script:windowBackgroundCapabilities.Count -gt 32) {
+    $oldestKey = @($script:windowBackgroundCapabilities.Keys)[0]
+    $script:windowBackgroundCapabilities.Remove($oldestKey)
   }
   # The comma keeps the List intact: a bare `return $out` unrolls a single-item
   # list into a scalar, so a one-element window would report elements as an object
@@ -1654,6 +1680,45 @@ function Notify-Cursor {
   Write-CursorState -X $X -Y $Y -Label $Label -Show $on
   Write-StatusState -Show $on
 }
+function Get-BackgroundCapabilityRecord {
+  param([IntPtr]$Hwnd, $Element)
+  if ($null -eq $Element -or $Hwnd -eq [IntPtr]::Zero -or $null -eq $script:windowBackgroundCapabilities) { return $null }
+  try {
+    $windowKey = [string]$Hwnd.ToInt64()
+    if (-not $script:windowBackgroundCapabilities.ContainsKey($windowKey)) { return $null }
+    $identity = Get-ElementIdentity $Element
+    $map = $script:windowBackgroundCapabilities[$windowKey]
+    if ($null -eq $map -or -not $map.ContainsKey($identity)) { return $null }
+    return $map[$identity]
+  } catch { return $null }
+}
+
+function Set-BackgroundCapability {
+  param([IntPtr]$Hwnd, $Element, [string]$Name, [bool]$Supported)
+  if ($null -eq $Element -or $Hwnd -eq [IntPtr]::Zero -or [string]::IsNullOrWhiteSpace($Name)) { return }
+  try {
+    $windowKey = [string]$Hwnd.ToInt64()
+    if (-not $script:windowBackgroundCapabilities.ContainsKey($windowKey)) { $script:windowBackgroundCapabilities[$windowKey] = @{} }
+    $map = $script:windowBackgroundCapabilities[$windowKey]
+    $identity = Get-ElementIdentity $Element
+    if (-not $map.ContainsKey($identity)) { $map[$identity] = @{} }
+    $map[$identity][$Name] = $Supported
+  } catch { }
+}
+
+function Resolve-BackgroundPattern {
+  param([IntPtr]$Hwnd, $Element, [string]$Name, $Pattern)
+  $cap = Get-BackgroundCapabilityRecord -Hwnd $Hwnd -Element $Element
+  if ($cap -and $cap.ContainsKey($Name) -and -not [bool]$cap[$Name]) {
+    return @{ supported = $false; cached = $true; pattern = $null }
+  }
+  $resolved = $null
+  $supported = $false
+  try { $supported = $Element.TryGetCurrentPattern($Pattern, [ref]$resolved) } catch { $supported = $false }
+  Set-BackgroundCapability -Hwnd $Hwnd -Element $Element -Name $Name -Supported $supported
+  return @{ supported = $supported; cached = $false; pattern = $resolved }
+}
+
 function Test-ElementInWindow {
   param(
     [System.Windows.Automation.AutomationElement]$Element,
@@ -2068,12 +2133,27 @@ function Invoke-FromPointInWindow {
     if ($null -ne $best) {
       $method = $null
       $bp = $null
-      if ($best.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$bp)) { $method = 'invoke' }
-      elseif ($best.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$bp)) { $method = 'toggle' }
-      elseif ($best.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$bp)) { $method = 'selection' }
+      $cap = Get-BackgroundCapabilityRecord -Hwnd $Hwnd -Element $best
+      $knownNoAction = ($cap -and $cap.ContainsKey('invoke') -and $cap.ContainsKey('toggle') -and $cap.ContainsKey('selection') -and
+        -not [bool]$cap.invoke -and -not [bool]$cap.toggle -and -not [bool]$cap.selection)
+      if ($knownNoAction) { throw 'background_unavailable: capability cache says target has no UIA invoke/toggle/selection path' }
+      if (-not $cap -or -not $cap.ContainsKey('invoke') -or [bool]$cap.invoke) {
+        if ($best.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$bp)) { $method = 'invoke'; Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'invoke' -Supported $true }
+        else { Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'invoke' -Supported $false }
+      }
+      if ($null -eq $method -and (-not $cap -or -not $cap.ContainsKey('toggle') -or [bool]$cap.toggle)) {
+        $bp = $null
+        if ($best.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$bp)) { $method = 'toggle'; Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'toggle' -Supported $true }
+        else { Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'toggle' -Supported $false }
+      }
+      if ($null -eq $method -and (-not $cap -or -not $cap.ContainsKey('selection') -or [bool]$cap.selection)) {
+        $bp = $null
+        if ($best.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$bp)) { $method = 'selection'; Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'selection' -Supported $true }
+        else { Set-BackgroundCapability -Hwnd $Hwnd -Element $best -Name 'selection' -Supported $false }
+      }
       # Revalidate after pattern lookup; never catch an action exception and retry.
       Assert-ClickTarget -Element $best -Hwnd $Hwnd -X $X -Y $Y -ExpectedName $ExpectedName
-      if ($null -eq $method) { throw 'background_unavailable: target has no verified UIA action pattern' }
+      if ($null -eq $method) { throw 'background_unavailable: target has no verified UIA action pattern; unsupported paths were cached' }
       $name = $best.Current.Name
       $rect = $best.Current.BoundingRectangle
       if ($method -eq 'invoke') { $bp.Invoke() }
@@ -3064,8 +3144,16 @@ function Invoke-ActionRequest {
       $el = Find-ElementByIndex -Hwnd $win.Hwnd -Index $element
       Assert-ConsequenceConfirmation -Element $el
       Assert-SensitiveConfirmation -Element $el
+      $cap = Get-BackgroundCapabilityRecord -Hwnd $win.Hwnd -Element $el
+      if ($dispatch -eq 'background' -and $cap -and $cap.ContainsKey('value') -and -not [bool]$cap.value) {
+        $result.background_unavailable = $true
+        $result.method = 'capability_cache'
+        $result.message = "Element $element is already known not to support ValuePattern; background set_value unavailable without retrying the unsupported path."
+        break
+      }
       $vp = $null
       if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+        Set-BackgroundCapability -Hwnd $win.Hwnd -Element $el -Name 'value' -Supported $true
         if ($dispatch -eq 'background') {
           $pt = Get-OverlayPoint-Element -Element $el -Win $win
           if ($pt) { Notify-Cursor -X $pt[0] -Y $pt[1] -Label 'set_value' }
@@ -3086,8 +3174,10 @@ function Invoke-ActionRequest {
           $result.message = "Set element $element value, but readback differed; inspect current state before deciding what to do next"
         }
       } elseif ($dispatch -eq 'background') {
+        Set-BackgroundCapability -Hwnd $win.Hwnd -Element $el -Name 'value' -Supported $false
         $result.background_unavailable = $true
-        $result.message = "Element $element has no ValuePattern; background set_value unavailable. Use dispatch=foreground (focus_type) or type instead."
+        $result.method = 'capability_cache_update'
+        $result.message = "Element $element has no ValuePattern; cached this unsupported background path until the next observation refresh."
       } else {
         $el.SetFocus()
         Start-Sleep -Milliseconds 100
@@ -3250,8 +3340,11 @@ function Invoke-ActionRequest {
           }
           for ($i = 0; $i -lt 16 -and $null -ne $el; $i++) {
             if ($win -and -not (Test-ElementInWindow -Element $el -Hwnd $win.Hwnd)) { break }
+            $resolvedPattern = if ($win) { Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'scroll' -Pattern ([System.Windows.Automation.ScrollPattern]::Pattern) } else { $null }
             $scp = $null
-            if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
+            $hasScroll = if ($resolvedPattern) { [bool]$resolvedPattern.supported } else { $el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp) }
+            if ($hasScroll) {
+              if ($resolvedPattern) { $scp = $resolvedPattern.pattern }
               $none = [System.Windows.Automation.ScrollAmount]::NoAmount
               for ($n = 0; $n -lt $amount; $n++) { if ($right) { $scp.Scroll([System.Windows.Automation.ScrollAmount]::LargeIncrement, $none) } else { $scp.Scroll([System.Windows.Automation.ScrollAmount]::LargeDecrement, $none) } }
               $result.method = 'scroll_pattern'; $done = $true; break
@@ -3259,11 +3352,21 @@ function Invoke-ActionRequest {
             $el = Get-UiaParent $el
           }
           if (-not $done -and $win) {
-            # The target-window document path above is occlusion-immune. Do not
-            # inspect screen FromPoint when it is absent: it may select a window
-            # covering the requested target.
-            $result.background_unavailable = $true
-            $result.message = 'scroll: target window has no verified document ScrollPattern; refusing screen-hit fallback'
+            $h = Find-TargetHwndAt -Hwnd $win.Hwnd -X $sx -Y $sy -Win $win
+            if ($h -ne [IntPtr]::Zero) {
+              $delta = $amount * 120
+              if (-not $right) { $delta = -$delta }
+              $wParam = [IntPtr]($delta -shl 16)
+              $client = [DshWin32]::ScreenToClientPoint($h, $sx, $sy)
+              $lParam = [IntPtr](($client.Y -band 0xFFFF) -shl 16 -bor ($client.X -band 0xFFFF))
+              $res = [IntPtr]::Zero
+              $null = [DshWin32]::SendMessageTimeout($h, 0x020E, $wParam, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
+              $result.method = 'wm_mousehwheel_target'
+              $result.message = "Scrolled $dir x$amount via WM_MOUSEHWHEEL to verified target hwnd $($h.ToInt64())"
+            } else {
+              $result.background_unavailable = $true
+              $result.message = 'scroll: target window has neither ScrollPattern nor a verified native HWND at the requested point'
+            }
           } elseif (-not $done) {
             $h = [IntPtr]::Zero
             $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
@@ -3299,7 +3402,9 @@ function Invoke-ActionRequest {
               $docCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document)
               $doc = $winEl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $docCond)
               $dscp = $null
-              if ($doc -and $doc.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$dscp)) {
+              $docScroll = if ($doc) { Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $doc -Name 'scroll' -Pattern ([System.Windows.Automation.ScrollPattern]::Pattern) } else { $null }
+              if ($docScroll -and $docScroll.supported) {
+                $dscp = $docScroll.pattern
                 $none = [System.Windows.Automation.ScrollAmount]::NoAmount
                 for ($n = 0; $n -lt $amount; $n++) { if ($down) { $dscp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $dscp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
                 $result.method = 'scroll_pattern'; $done = $true
@@ -3308,15 +3413,27 @@ function Invoke-ActionRequest {
             }
           }
           if (-not $done) {
-            $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+            if ($win) {
+              $el = (Find-TargetHitsAt -Hwnd $win.Hwnd -X $sx -Y $sy).best
+              if ($null -eq $el) { try { $el = [System.Windows.Automation.AutomationElement]::FromHandle($win.Hwnd) } catch { $el = $null } }
+            } else {
+              $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+            }
             for ($i = 0; $i -lt 16 -and $null -ne $el; $i++) {
+              if ($win -and -not (Test-ElementInWindow -Element $el -Hwnd $win.Hwnd)) { break }
+              $resolvedRange = if ($win) { Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'range_value' -Pattern ([System.Windows.Automation.RangeValuePattern]::Pattern) } else { $null }
               $rvp = $null
-              if ($el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rvp)) {
+              $hasRange = if ($resolvedRange) { [bool]$resolvedRange.supported } else { $el.TryGetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern, [ref]$rvp) }
+              if ($hasRange) {
+                if ($resolvedRange) { $rvp = $resolvedRange.pattern }
                 for ($n = 0; $n -lt $amount; $n++) { if ($down) { $rvp.SmallIncrement() } else { $rvp.SmallDecrement() } }
                 $result.method = 'range_value'; $done = $true; break
               }
+              $resolvedScroll = if ($win) { Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'scroll' -Pattern ([System.Windows.Automation.ScrollPattern]::Pattern) } else { $null }
               $scp = $null
-              if ($el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
+              $hasScroll = if ($resolvedScroll) { [bool]$resolvedScroll.supported } else { $el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp) }
+              if ($hasScroll) {
+                if ($resolvedScroll) { $scp = $resolvedScroll.pattern }
                 $none = [System.Windows.Automation.ScrollAmount]::NoAmount
                 for ($n = 0; $n -lt $amount; $n++) { if ($down) { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) } else { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) } }
                 $result.method = 'scroll_pattern'; $done = $true; break
@@ -3326,25 +3443,29 @@ function Invoke-ActionRequest {
           }
           if (-not $done) {
             $h = [IntPtr]::Zero
-            $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
-            for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
-              $nh = $wEl.Current.NativeWindowHandle
-              if ($nh -ne 0) { $h = [IntPtr]$nh; break }
-              $wEl = Get-UiaParent $wEl
+            if ($win) {
+              $h = Find-TargetHwndAt -Hwnd $win.Hwnd -X $sx -Y $sy -Win $win
+            } else {
+              $wEl = [System.Windows.Automation.AutomationElement]::FromPoint($pt)
+              for ($i = 0; $i -lt 24 -and $null -ne $wEl; $i++) {
+                $nh = $wEl.Current.NativeWindowHandle
+                if ($nh -ne 0) { $h = [IntPtr]$nh; break }
+                $wEl = Get-UiaParent $wEl
+              }
             }
-            if ($h -eq [IntPtr]::Zero -and $win) { $h = $win.Hwnd }
             if ($h -ne [IntPtr]::Zero) {
               $delta = $amount * 120
               if ($down) { $delta = -$delta }
               $wParam = [IntPtr]($delta -shl 16)
-              $lParam = [IntPtr](($sy -band 0xFFFF) -shl 16 -bor ($sx -band 0xFFFF))
+              $client = [DshWin32]::ScreenToClientPoint($h, $sx, $sy)
+              $lParam = [IntPtr](($client.Y -band 0xFFFF) -shl 16 -bor ($client.X -band 0xFFFF))
               $res = [IntPtr]::Zero
               $null = [DshWin32]::SendMessageTimeout($h, 0x020A, $wParam, $lParam, [DshWin32]::SMTO_ABORTIFHUNG, 3000, [ref]$res)
-              $result.method = 'wm_mousewheel'
+              $result.method = if ($win) { 'wm_mousewheel_target' } else { 'wm_mousewheel' }
               $result.message = "Scrolled $dir x$amount via WM_MOUSEWHEEL to hwnd $($h.ToInt64())"
             } else {
               $result.background_unavailable = $true
-              $result.message = 'scroll: no window under the point; nothing to scroll'
+              $result.message = if ($win) { 'scroll: target window has neither a usable UIA scroll path nor a verified native HWND at the requested point' } else { 'scroll: no window under the point; nothing to scroll' }
             }
           } else {
             $result.message = "Scrolled $dir x$amount via $($result.method)"
@@ -4208,58 +4329,72 @@ function Invoke-ActionRequest {
         throw "perform_secondary_action requires 'secondary_action' (supported: $supportedPerforms)"
       }
       if ($perform -in @('invoke', 'press', 'click')) {
-        $ip = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'invoke' -Pattern ([System.Windows.Automation.InvokePattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support InvokePattern; unsupported background path cached."; break }
           throw "element $element does not support InvokePattern; cannot perform '$perform'"
         }
+        $ip = $resolvedPattern.pattern
         $ip.Invoke()
         $result.method = 'invoke_pattern'
         $result.message = "Performed '$perform' on element $element via InvokePattern"
       } elseif ($perform -in @('toggle', 'switch')) {
-        $tog = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$tog)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'toggle' -Pattern ([System.Windows.Automation.TogglePattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support TogglePattern; unsupported background path cached."; break }
           throw "element $element does not support TogglePattern; cannot perform '$perform'"
         }
+        $tog = $resolvedPattern.pattern
         $tog.Toggle()
         $result.method = 'toggle_pattern'
         $result.message = "Performed '$perform' on element $element via TogglePattern"
       } elseif ($perform -eq 'select') {
-        $sel = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$sel)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'selection' -Pattern ([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support SelectionItemPattern; unsupported background path cached."; break }
           throw "element $element does not support SelectionItemPattern; cannot perform '$perform'"
         }
+        $sel = $resolvedPattern.pattern
         $sel.Select()
         $result.method = 'selection_pattern'
         $result.message = "Performed '$perform' on element $element via SelectionItemPattern"
       } elseif ($perform -eq 'add_to_selection') {
-        $sel = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$sel)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'selection' -Pattern ([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support SelectionItemPattern; unsupported background path cached."; break }
           throw "element $element does not support SelectionItemPattern; cannot perform '$perform'"
         }
+        $sel = $resolvedPattern.pattern
         $sel.AddToSelection()
         $result.method = 'selection_pattern'
         $result.message = "Performed '$perform' on element $element via SelectionItemPattern"
       } elseif ($perform -eq 'remove_from_selection') {
-        $sel = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$sel)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'selection' -Pattern ([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support SelectionItemPattern; unsupported background path cached."; break }
           throw "element $element does not support SelectionItemPattern; cannot perform '$perform'"
         }
+        $sel = $resolvedPattern.pattern
         $sel.RemoveFromSelection()
         $result.method = 'selection_pattern'
         $result.message = "Performed '$perform' on element $element via SelectionItemPattern"
       } elseif ($perform -eq 'expand') {
-        $exp = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$exp)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'expand_collapse' -Pattern ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support ExpandCollapsePattern; unsupported background path cached."; break }
           throw "element $element does not support ExpandCollapsePattern; cannot perform '$perform'"
         }
+        $exp = $resolvedPattern.pattern
         $exp.Expand()
         $result.method = 'expand_pattern'
         $result.message = "Performed '$perform' on element $element via ExpandCollapsePattern"
       } elseif ($perform -eq 'collapse') {
-        $exp = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$exp)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'expand_collapse' -Pattern ([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support ExpandCollapsePattern; unsupported background path cached."; break }
           throw "element $element does not support ExpandCollapsePattern; cannot perform '$perform'"
         }
+        $exp = $resolvedPattern.pattern
         $exp.Collapse()
         $result.method = 'expand_pattern'
         $result.message = "Performed '$perform' on element $element via ExpandCollapsePattern"
@@ -4268,10 +4403,12 @@ function Invoke-ActionRequest {
         $result.method = 'set_focus'
         $result.message = "Focused element $element"
       } elseif ($perform -in @('scroll_up', 'scroll_down', 'scroll_left', 'scroll_right')) {
-        $scp = $null
-        if (-not $el.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scp)) {
+        $resolvedPattern = Resolve-BackgroundPattern -Hwnd $win.Hwnd -Element $el -Name 'scroll' -Pattern ([System.Windows.Automation.ScrollPattern]::Pattern)
+        if (-not $resolvedPattern.supported) {
+          if ($dispatch -eq 'background') { $result.background_unavailable = $true; $result.method = if ($resolvedPattern.cached) { 'capability_cache' } else { 'capability_cache_update' }; $result.message = "Element $element does not support ScrollPattern; unsupported background path cached."; break }
           throw "element $element does not support ScrollPattern; cannot perform '$perform'"
         }
+        $scp = $resolvedPattern.pattern
         $none = [System.Windows.Automation.ScrollAmount]::NoAmount
         if ($perform -eq 'scroll_up') { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeDecrement) }
         elseif ($perform -eq 'scroll_down') { $scp.Scroll($none, [System.Windows.Automation.ScrollAmount]::LargeIncrement) }

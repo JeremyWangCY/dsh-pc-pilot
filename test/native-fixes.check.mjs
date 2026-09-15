@@ -67,12 +67,23 @@ assert.ok(
   'wildcard search with -like "*$App*" must be removed'
 )
 
-// 4. Double-Scroll Defect guard in pc-pilot-helper.ps1
+// 4. Background scroll routing must stay target-window scoped when an app/window is supplied.
+const scrollBlock = helperContent.slice(helperContent.indexOf("    'scroll' {"), helperContent.indexOf("    'drag' {"))
 assert.match(
-  helperContent,
-  /if\s*\(\$doc\s*-and\s*\$doc\.TryGetCurrentPattern\(.*?\$done\s*=\s*\$true.*?if\s*\(-not\s*\$done\)\s*\{\s*\$el\s*=\s*\[System\.Windows\.Automation\.AutomationElement\]::FromPoint\(\$pt\)/s,
-  'element-under-cursor scroll fallback must be wrapped in if (-not $done)'
+  scrollBlock,
+  /if\s*\(\$win\)\s*\{\s*\$h\s*=\s*Find-TargetHwndAt\s+-Hwnd\s+\$win\.Hwnd[\s\S]*?\}\s*else\s*\{\s*\$wEl\s*=\s*\[System\.Windows\.Automation\.AutomationElement\]::FromPoint\(\$pt\)/,
+  'targeted vertical scroll must resolve WM fallback inside the target window before any global screen hit-test'
 )
+assert.match(
+  scrollBlock,
+  /wm_mousehwheel_target/,
+  'targeted horizontal scroll must have an occlusion-immune verified HWND fallback'
+)
+
+// 4b. UIA background capability routing is cached per observed window/element.
+assert.ok(helperContent.includes('$script:windowBackgroundCapabilities'), 'helper must keep per-window background capability memory')
+assert.match(helperContent, /function\s+Resolve-BackgroundPattern/, 'helper must centralize cached UIA pattern resolution')
+assert.match(helperContent, /capability_cache_update/, 'unsupported background paths must be remembered instead of reprobed every action')
 
 // 5. Dark Mode / Black Screenshot Detection in pc-pilot-helper.ps1
 assert.ok(
