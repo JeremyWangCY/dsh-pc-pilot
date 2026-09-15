@@ -113,9 +113,21 @@ try {
     assert.ok(found, `Missing fixture control: ${name}`)
     return found.element
   }
+  const getRef = (s, name) => {
+    const found = s.elements.find(x => x.name === name)
+    assert.ok(found, `Missing fixture control: ${name}`)
+    assert.match(found.ref, /^@e[1-9]\d*$/)
+    return found.ref
+  }
   const click = (element, options = {}) => browserAction('browser_click', { ...args, element, ...options })
   let s = await eventually(async () => { const value = await state(); get(value, 'Message'); return value })
   assert.ok(typeof s.navigation_id === 'string' && s.navigation_id, 'browser_state exposes navigation identity')
+  assert.match(s.observation_id, /^[a-f0-9]{32}$/i, 'browser_state exposes observation identity')
+  assert.ok(s.elements.every(item => /^@e[1-9]\d*$/.test(item.ref)), 'browser_state exposes short semantic refs')
+  const semanticObservation = await browserAction('browser_observe', args)
+  assert.notEqual(semanticObservation.observation_id, s.observation_id)
+  assert.equal(getRef(semanticObservation, 'Message'), getRef(s, 'Message'), 'same live element keeps its short ref across observations')
+  const messageRef = getRef(semanticObservation, 'Message')
   assert.equal(typeof s.can_go_back, 'boolean')
   assert.equal(typeof s.can_go_forward, 'boolean')
   const initialBrowserSession = s.browser_session_id
@@ -148,7 +160,7 @@ try {
   assert.ok(s.elements.length < 20, 'hidden controls must not crowd out useful state')
   await browserAction('browser_replace', { ...args, element: get(s, 'Shadow editor'), text: 'shadow replacement' })
   assert.equal(get(await state(), 'Message'), message, 'tokens stable across state/connection')
-  const typed = await browserAction('browser_type', { ...args, element: message, text: 'fixture secret 123' })
+  const typed = await browserAction('browser_type', { ...args, element: messageRef, text: 'fixture secret 123' })
   assert.ok(typed.screenshot?.path && existsSync(typed.screenshot.path), 'browser mutation returns a fresh screenshot')
   await assertBrowserSessionStable('typing')
   assert.ok(!JSON.stringify(await state()).includes('fixture secret'))
@@ -191,9 +203,11 @@ try {
   await assert.rejects(click(oldRefresh), /Stale|rejected/)
   assert.equal(likes, 1, 'click dispatched once; persisted through reload')
   const beforeUrlChange = get(s, 'Message')
+  const beforeUrlRef = getRef(s, 'Message')
   const originalUrl = s.url
   await click(get(s, 'Change URL'))
   await assert.rejects(browserAction('browser_type', { ...args, element: beforeUrlChange, text: 'must not type' }), /Stale/)
+  await assert.rejects(browserAction('browser_type', { ...args, element: beforeUrlRef, text: 'must not type' }), /ref|Stale/i)
   const urlChanged = await browserAction('browser_wait', { ...args, browser_wait_for: 'url_change', expected_url: originalUrl, browser_wait_timeout_ms: 2000 })
   assert.equal(urlChanged.ok, true)
   assert.ok(urlChanged.url.endsWith('/changed'))

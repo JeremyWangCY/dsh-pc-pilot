@@ -20,6 +20,8 @@ assert.ok(parameters.url, 'computer schema must expose initial browser URL')
 assert.equal(parameters.activate.type, 'boolean', 'launch_app foreground activation must be model-callable')
 assert.ok(parameters.include_text, 'computer schema must expose screenshot-first include_text control')
 assert.match(parameters.include_text.description, /default false/i)
+assert.ok(actionEnum.includes('browser_observe'), 'browser_observe must remain model-callable')
+assert.match(parameters.browser_element.description, /@eN/, 'browser_element must document compact semantic refs')
 
 assert.deepEqual(normalizeComputerAction({ action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0 }).args, {
   action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0, scroll_x: 240, scroll_y: 0, amount: 2, direction: 'right',
