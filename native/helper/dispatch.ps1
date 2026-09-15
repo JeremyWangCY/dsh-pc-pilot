@@ -1927,8 +1927,7 @@ function Write-DaemonReply {
   else { $Reply = @{ id = $Id; ok = $false; action = ''; message = 'invalid reply object' } }
   # single-line JSON, always: compress, then strip any residual newline
   $json = ($Reply | ConvertTo-Json -Compress -Depth 10) -replace "(`r|`n)", ' '
-  [Console]::Out.WriteLine($json)
-  [Console]::Out.Flush()
+  [PcPilotDeadline]::WriteReply($json + [Environment]::NewLine)
 }
 
 # ---------------------------------------------------------------- daemon mode (-Server)
@@ -1942,7 +1941,7 @@ if ($Server) {
   # EOF (stdin closed by node) or process kill.
   while ($true) {
     $line = $null
-    try { $line = [Console]::In.ReadLine() } catch { break }
+    try { $line = [PcPilotDeadline]::ReadUtf8Line() } catch { break }
     if ($null -eq $line) { break }   # stdin closed -> exit cleanly
     $trimmed = $line.Trim()
     if ($trimmed.Length -eq 0) { continue }
@@ -1984,7 +1983,7 @@ $rawJson = ''
 try {
   # Explicit JSON must not wait for an unrelated inherited/open input pipe.
   if ($PayloadStdin -or (-not $PSBoundParameters.ContainsKey('PayloadJson') -and [Console]::IsInputRedirected)) {
-    $rawJson = [Console]::In.ReadToEnd()
+    $rawJson = [PcPilotDeadline]::ReadUtf8ToEnd()
   }
   if ((-not $rawJson) -and $PayloadJson) {
     $rawJson = $PayloadJson
@@ -1993,7 +1992,8 @@ try {
     $script:payload = $rawJson | ConvertFrom-Json
   }
 } catch {
-  @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+  $invalidReply = @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+  [PcPilotDeadline]::WriteReply($invalidReply)
   exit 0
 }
 

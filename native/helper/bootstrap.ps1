@@ -44,6 +44,7 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -TypeDefinition @'
 using System;
 using System.Text;
+using System.IO;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
@@ -795,12 +796,22 @@ public static class PcPilotDeadline
 {
   private static System.Threading.Timer timer;
   private static readonly object gate = new object();
+  private static readonly StreamReader input = new StreamReader(
+    Console.OpenStandardInput(), new UTF8Encoding(false, true), false, 4096, true);
+  public static string ReadUtf8ToEnd() { return input.ReadToEnd(); }
+  public static string ReadUtf8Line() { return input.ReadLine(); }
+  private static void WriteUtf8(string reply)
+  {
+    byte[] bytes = new UTF8Encoding(false).GetBytes(reply ?? "");
+    Stream output = Console.OpenStandardOutput();
+    output.Write(bytes, 0, bytes.Length);
+    output.Flush();
+  }
   public static void Start(int milliseconds, string reply)
   {
     timer = new System.Threading.Timer(delegate(object state) {
       lock (gate) {
-        Console.Out.Write(reply);
-        Console.Out.Flush();
+        WriteUtf8(reply);
         Environment.Exit(124);
       }
     }, null, milliseconds, System.Threading.Timeout.Infinite);
@@ -809,8 +820,7 @@ public static class PcPilotDeadline
   {
     lock (gate) {
       if (timer != null) { timer.Dispose(); timer = null; }
-      Console.Out.Write(reply);
-      Console.Out.Flush();
+      WriteUtf8(reply);
     }
   }
 }

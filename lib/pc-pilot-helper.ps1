@@ -44,6 +44,7 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -TypeDefinition @'
 using System;
 using System.Text;
+using System.IO;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
@@ -795,12 +796,22 @@ public static class PcPilotDeadline
 {
   private static System.Threading.Timer timer;
   private static readonly object gate = new object();
+  private static readonly StreamReader input = new StreamReader(
+    Console.OpenStandardInput(), new UTF8Encoding(false, true), false, 4096, true);
+  public static string ReadUtf8ToEnd() { return input.ReadToEnd(); }
+  public static string ReadUtf8Line() { return input.ReadLine(); }
+  private static void WriteUtf8(string reply)
+  {
+    byte[] bytes = new UTF8Encoding(false).GetBytes(reply ?? "");
+    Stream output = Console.OpenStandardOutput();
+    output.Write(bytes, 0, bytes.Length);
+    output.Flush();
+  }
   public static void Start(int milliseconds, string reply)
   {
     timer = new System.Threading.Timer(delegate(object state) {
       lock (gate) {
-        Console.Out.Write(reply);
-        Console.Out.Flush();
+        WriteUtf8(reply);
         Environment.Exit(124);
       }
     }, null, milliseconds, System.Threading.Timeout.Infinite);
@@ -809,8 +820,7 @@ public static class PcPilotDeadline
   {
     lock (gate) {
       if (timer != null) { timer.Dispose(); timer = null; }
-      Console.Out.Write(reply);
-      Console.Out.Flush();
+      WriteUtf8(reply);
     }
   }
 }
@@ -4390,8 +4400,7 @@ function Write-DaemonReply {
   else { $Reply = @{ id = $Id; ok = $false; action = ''; message = 'invalid reply object' } }
   # single-line JSON, always: compress, then strip any residual newline
   $json = ($Reply | ConvertTo-Json -Compress -Depth 10) -replace "(`r|`n)", ' '
-  [Console]::Out.WriteLine($json)
-  [Console]::Out.Flush()
+  [PcPilotDeadline]::WriteReply($json + [Environment]::NewLine)
 }
 
 # ---------------------------------------------------------------- daemon mode (-Server)
@@ -4405,7 +4414,7 @@ if ($Server) {
   # EOF (stdin closed by node) or process kill.
   while ($true) {
     $line = $null
-    try { $line = [Console]::In.ReadLine() } catch { break }
+    try { $line = [PcPilotDeadline]::ReadUtf8Line() } catch { break }
     if ($null -eq $line) { break }   # stdin closed -> exit cleanly
     $trimmed = $line.Trim()
     if ($trimmed.Length -eq 0) { continue }
@@ -4447,7 +4456,7 @@ $rawJson = ''
 try {
   # Explicit JSON must not wait for an unrelated inherited/open input pipe.
   if ($PayloadStdin -or (-not $PSBoundParameters.ContainsKey('PayloadJson') -and [Console]::IsInputRedirected)) {
-    $rawJson = [Console]::In.ReadToEnd()
+    $rawJson = [PcPilotDeadline]::ReadUtf8ToEnd()
   }
   if ((-not $rawJson) -and $PayloadJson) {
     $rawJson = $PayloadJson
@@ -4456,7 +4465,8 @@ try {
     $script:payload = $rawJson | ConvertFrom-Json
   }
 } catch {
-  @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+  $invalidReply = @{ ok = $false; action = $Action; message = "Invalid JSON payload: $($_.Exception.Message)" } | ConvertTo-Json -Compress
+  [PcPilotDeadline]::WriteReply($invalidReply)
   exit 0
 }
 

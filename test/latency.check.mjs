@@ -23,7 +23,7 @@ const pkgSrc = fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8')
 
 assert.ok(helperSrc.includes('[switch]$Server'), 'helper must declare a -Server daemon mode switch')
 assert.ok(helperSrc.includes("'invalid request'"), 'helper daemon must reply invalid request for bad lines')
-assert.ok(helperSrc.includes('[Console]::In.ReadLine()'), 'helper daemon must read stdin line-by-line (blocking ReadLine -> dispatch -> reply)')
+assert.ok(helperSrc.includes('[PcPilotDeadline]::ReadUtf8Line()'), 'helper daemon must read UTF-8 stdin line-by-line (blocking ReadLine -> dispatch -> reply)')
 // judge fix 1: PS-side idle-exit machinery removed entirely (it could never fire)
 assert.ok(!helperSrc.includes('lastRequestUtc'), 'helper daemon must NOT keep the broken PS-side idle-exit machinery')
 assert.ok(!helperSrc.includes('ReadLineAsync'), 'helper daemon must not use the ReadLineAsync+Wait poll (idle check never ran)')

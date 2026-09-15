@@ -303,8 +303,8 @@ assert.doesNotMatch(
 )
 assert.match(
   helperContent,
-  /catch\s*\{\s*@\{\s*ok\s*=\s*\$false;\s*action\s*=\s*\$Action;\s*message\s*=\s*"Invalid JSON payload:/s,
-  'pc-pilot-helper.ps1 must catch JSON parse errors and return compressed JSON with ok: false'
+  /catch\s*\{[\s\S]*?\$invalidReply\s*=\s*@\{\s*ok\s*=\s*\$false;\s*action\s*=\s*\$Action;\s*message\s*=\s*"Invalid JSON payload:[\s\S]*?\[PcPilotDeadline\]::WriteReply\(\$invalidReply\)/s,
+  'pc-pilot-helper.ps1 must catch JSON parse errors and return compressed UTF-8 JSON with ok: false'
 )
 
 const b64Match = overlayContent.match(/\$b64\s*=\s*"([^"]+)"/)

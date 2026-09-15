@@ -74,8 +74,14 @@ assert.ok(
   'pc-pilot-helper.ps1 must set [Console]::OutputEncoding to UTF-8'
 )
 assert.ok(
-  helperSrc.includes('[Console]::In.ReadToEnd()'),
-  'pc-pilot-helper.ps1 must read stdin via [Console]::In.ReadToEnd()'
+  helperSrc.includes('[PcPilotDeadline]::ReadUtf8ToEnd()')
+    && helperSrc.includes('Console.OpenStandardInput()'),
+  'pc-pilot-helper.ps1 must decode redirected stdin explicitly as UTF-8'
+)
+assert.ok(
+  helperSrc.includes('Console.OpenStandardOutput()')
+    && helperSrc.includes('new UTF8Encoding(false).GetBytes'),
+  'pc-pilot-helper.ps1 must encode JSON stdout explicitly as UTF-8'
 )
 
 // lib/pc-pilot-helper.ps1 scroll WM_MOUSEWHEEL & dead overload checks
