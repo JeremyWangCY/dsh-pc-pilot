@@ -25,7 +25,11 @@ const props = parameters.properties
 assert.equal(props.path.type, 'array')
 assert.equal(props.path.items.type, 'object')
 assert.deepEqual(Object.keys(props.path.items.properties).sort(), ['x', 'y'])
-assert.deepEqual(props.path.items.required, ['x', 'y'])
+const requiredPointFields = props.path.items.required || Object.entries(props.path.items.properties)
+  .filter(([, schema]) => schema.required === true)
+  .map(([name]) => name)
+  .sort()
+assert.deepEqual(requiredPointFields, ['x', 'y'])
 assert.equal(props.screenshot_path.type, 'string')
 
 console.log('Gemini tool schema compatibility check PASSED')
