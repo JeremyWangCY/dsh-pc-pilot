@@ -147,8 +147,19 @@ const streamRes = await runAction('mouse_down', {
 assert.ok(streamRes, 'runAction should return a valid response')
 assert.equal(streamRes.ok, false, 'Expected deterministic invalid mouse button rejection')
 assert.equal(typeof streamRes.message, 'string')
+const transportProbeValidated = streamRes.message.startsWith('invalid mouse button:')
+if (!transportProbeValidated) {
+  console.error('IPC transport probe diagnostic:', JSON.stringify({
+    messagePrefix: streamRes.message.slice(0, 240),
+    messageLength: streamRes.message.length,
+    errorCode: streamRes.error_code,
+    outcome: streamRes.outcome,
+    exitCode: streamRes.exitCode,
+    keys: Object.keys(streamRes),
+  }))
+}
 assert.ok(
-  streamRes.message.startsWith('invalid mouse button:'),
+  transportProbeValidated,
   'Transport probe must fail at button validation before any desktop access'
 )
 // This check is only about stdin/stdout fidelity after deterministic validation.
