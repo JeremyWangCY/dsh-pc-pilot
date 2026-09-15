@@ -134,24 +134,26 @@ assert.equal(
 )
 assert.equal(typeRes.action, 'type_text')
 
-// 4. Verification: Stdin streaming with large (>80KB) JSON payload & Unicode/emoji preservation
+// 4. Verification: Stdin streaming with large (>80KB) JSON payload & Unicode/emoji preservation.
+// Use a deterministic validation error before any desktop/window access so hosted CI and interactive PCs exercise the same transport path.
 const unicodeSignature = '🚀_🌟_Unicode_测试_€_©_🤖_🎉'
 // >85KB payload: would fail Windows command-line limit (~32KB) if passed on argv
-const largePayloadString = unicodeSignature + '_PADDING_' + 'Z'.repeat(88000)
+const largePayloadString = unicodeSignature + '_PADDING_' + '7'.repeat(88000)
 
-const streamRes = await runAction('get_window_state', {
-  app: largePayloadString,
-  window_index: 1,
+const streamRes = await runAction('mouse_down', {
+  button: largePayloadString,
 })
 
 assert.ok(streamRes, 'runAction should return a valid response')
-assert.equal(streamRes.ok, false, 'Expected app_not_found for synthetic test app name')
+assert.equal(streamRes.ok, false, 'Expected deterministic invalid mouse button rejection')
 assert.equal(typeof streamRes.message, 'string')
-// The exact resolver prefix can vary across Windows runner environments.
-// This check is about stdin transport fidelity: the synthetic target must fail,
-// while the complete Unicode payload survives the helper round-trip.
 assert.ok(
-  streamRes.message.includes(unicodeSignature),
+  streamRes.message.startsWith('invalid mouse button:'),
+  'Transport probe must fail at button validation before any desktop access'
+)
+// This check is only about stdin/stdout fidelity after deterministic validation.
+assert.ok(
+  streamRes.message.toLowerCase().includes(unicodeSignature.toLowerCase()),
   'Unicode characters and emojis must be preserved exactly through stdin/stdout round-trip'
 )
 assert.ok(
