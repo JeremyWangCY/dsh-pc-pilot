@@ -135,8 +135,8 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `press_key` / `hold_key` | Key chords and timed holds |
 | `scroll` | Standard `scroll_x/scroll_y` (including target-window horizontal UIA scrolling), or legacy `amount` plus `direction` |
 | `move` / `mouse_move` / `mouse_down` / `mouse_up` | Standard move plus raw mouse primitives |
-| `drag` | Standard `path` or legacy endpoints; element move (background) or real SendInput drag (foreground) |
-| `screenshot` / `zoom` | Full-display or region capture; crop the latest shot |
+| `drag` | Standard `path` of `{x, y}` points or legacy endpoints; element move (background) or real SendInput drag (foreground) |
+| `screenshot` / `zoom` | Full-display or region capture; crop `screenshot_path` from a prior capture (`path` remains accepted by the runtime for compatibility) |
 | `switch_display` / `cursor_position` | Default capture display; real cursor location |
 | `launch_app` / `wait` | Launch an app behind the active work without activating it; the window stays normally renderable for WGC/UIA instead of remaining minimized. Registered Windows activation protocols such as `ms-settings:display` are supported. Delegated app launches return a target only when exactly one new window is safely identifiable; pause between actions |
 | `activate_window` / `close_window` / `get_window` | Bring window to foreground / request a graceful WM_CLOSE and verify disappearance (otherwise returns `window_close_unconfirmed`) / query fresh window geometry & metadata |

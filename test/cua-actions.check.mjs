@@ -13,7 +13,9 @@ for (const removed of ['get_app_state', 'open_app', 'click_element', 'key', 'per
   assert.ok(!actionEnum.includes(removed), `legacy action must not be model-callable: ${removed}`)
 }
 assert.equal(parameters.keys.type, 'array')
-assert.ok(parameters.path.oneOf, 'path must accept both drag paths and zoom screenshot paths')
+assert.equal(parameters.path.type, 'array', 'drag path must use a Gemini-compatible array schema')
+assert.equal(parameters.path.items.type, 'object', 'drag path points must have one unambiguous type')
+assert.equal(parameters.screenshot_path.type, 'string', 'zoom must expose a separate screenshot path')
 assert.equal(parameters.actions.type, 'array')
 assert.equal(parameters.action.required, undefined, 'action is optional when an ordered actions array is supplied')
 assert.ok(parameters.url, 'computer schema must expose initial browser URL')
@@ -40,6 +42,12 @@ assert.deepEqual(normalizeComputerAction({ action: 'scroll', scroll_x: 120, scro
 ])
 assert.deepEqual(normalizeComputerAction({ action: 'drag', path: [[1, 2], [30, 40], [50, 60]] }).args, {
   action: 'drag', path: [[1, 2], [30, 40], [50, 60]], from_x: 1, from_y: 2, to_x: 50, to_y: 60,
+})
+assert.deepEqual(normalizeComputerAction({ action: 'zoom', screenshot_path: 'C:\\capture.png' }).args, {
+  action: 'zoom', path: 'C:\\capture.png',
+})
+assert.deepEqual(normalizeComputerAction({ action: 'zoom', path: 'C:\\legacy.png' }).args, {
+  action: 'zoom', path: 'C:\\legacy.png',
 })
 assert.equal(normalizeComputerAction({ action: 'click', keys: ['CTRL'], x: 1, y: 2 }).args.modifiers, 'CTRL')
 assert.equal(normalizeComputerAction({ action: 'click', screenshotId: 'shot-1' }).args.screenshot_id, 'shot-1')

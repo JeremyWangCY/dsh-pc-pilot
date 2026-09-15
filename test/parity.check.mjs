@@ -47,7 +47,9 @@ for (const [name, type] of expectedParams) {
   assert.ok(params[name], `${name} parameter must be present`)
   assert.equal(params[name].type, type, `${name} must be typed '${type}'`)
 }
-assert.ok(params.path.oneOf, 'path must accept both the canonical drag path and zoom screenshot path')
+assert.equal(params.path.type, 'array', 'drag path must be a Gemini-compatible array')
+assert.equal(params.path.items.type, 'object', 'drag path items must have one unambiguous type')
+assert.equal(params.screenshot_path.type, 'string', 'zoom screenshot path must be separate from drag path')
 
 // direction now covers horizontal scrolling
 assert.deepEqual(params.direction.enum, ['down', 'up', 'left', 'right'])
@@ -106,7 +108,7 @@ assert.ok(fs.existsSync(shotRes.path), `screenshot file must exist on disk: ${sh
 assert.ok(shotRes.width > 0 && shotRes.height > 0, `screenshot width/height must be positive: ${shotRes.width}x${shotRes.height}`)
 
 // zoom: 10x10 crop of the screenshot we just took
-const zoomRes = await tool.execute({ action: 'zoom', path: shotRes.path, x: 0, y: 0, width: 10, height: 10 })
+const zoomRes = await tool.execute({ action: 'zoom', screenshot_path: shotRes.path, x: 0, y: 0, width: 10, height: 10 })
 assert.ok(zoomRes, 'zoom must return a result object')
 assert.equal(zoomRes.ok, true, `zoom should succeed: ${JSON.stringify(zoomRes)}`)
 assert.equal(zoomRes.action, 'zoom')
@@ -122,7 +124,7 @@ assert.equal(switchRes.action, 'switch_display')
 assert.equal(switchRes.display, 1)
 
 // zoom without a crop size must fail loudly, not silently produce a 1x1 crop
-const zoomNoSizeRes = await tool.execute({ action: 'zoom', path: shotRes.path, x: 0, y: 0 })
+const zoomNoSizeRes = await tool.execute({ action: 'zoom', screenshot_path: shotRes.path, x: 0, y: 0 })
 assert.equal(zoomNoSizeRes.ok, false, `zoom without width/height must fail: ${JSON.stringify(zoomNoSizeRes)}`)
 assert.ok(
   /width and height are required/.test(zoomNoSizeRes.message || ''),

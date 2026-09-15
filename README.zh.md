@@ -173,8 +173,8 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `press_key` / `hold_key` | 标准 keysym 风格组合键与定时按住；Windows/Meta/Command 键会被拒绝 | `window`、`key`、`duration_ms` |
 | `scroll` | 标准滚动增量（同时给出横纵轴时两者均会执行；指定窗口时横向滚动先走其自身 UIA 树），或旧式滚轮刻度 | `x`、`y`、`scroll_x`、`scroll_y`，或 `amount`、`direction` |
 | `mouse_down` / `mouse_up` | 原始鼠标原语 | `x`、`y`、`button`；无法安全后台投递时返回 `background_unavailable` |
-| `drag` | 标准有序路径，或旧式端点；前台真实 SendInput 逐段拖动，后台 UIA 移动返回端点模式 | `path`，或 `from_x`、`from_y`、`to_x`、`to_y` |
-| `screenshot` / `zoom` | 整屏或区域截图 / 裁剪最近一张截图 | `display`?、`x`、`y`、`width`、`height`、`path`? |
+| `drag` | `{x, y}` 点组成的标准有序路径，或旧式端点；前台真实 SendInput 逐段拖动，后台 UIA 移动返回端点模式 | `path`，或 `from_x`、`from_y`、`to_x`、`to_y` |
+| `screenshot` / `zoom` | 整屏或区域截图 / 裁剪先前截图；执行层仍兼容旧 `path` 输入 | `display`?、`x`、`y`、`width`、`height`、`screenshot_path`? |
 | `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
 | `launch_app` / `wait` | 默认在不激活、不抢焦点的前提下把新窗口放到当前工作窗口后层，并保持正常可渲染状态，便于 WGC/UIA 持续后台操作；只有用户明确要求带到前台时才传 `activate: true`。支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回可直接复用的 `window`；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `activate`? / `duration_s` / `wait_for` |
 | `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) 并核验窗口确实消失，否则返回 `window_close_unconfirmed` / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
