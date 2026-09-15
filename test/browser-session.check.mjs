@@ -126,6 +126,8 @@ try {
   assert.ok(s.elements.every(item => /^@e[1-9]\d*$/.test(item.ref)), 'browser_state exposes short semantic refs')
   const semanticObservation = await browserAction('browser_observe', args)
   assert.notEqual(semanticObservation.observation_id, s.observation_id)
+  assert.ok(semanticObservation.elements.every(item => item.element === undefined), 'browser_observe omits raw UUID element tokens')
+  assert.ok(s.elements.every(item => typeof item.element === 'string' && item.element), 'browser_state preserves raw element tokens for compatibility')
   assert.equal(getRef(semanticObservation, 'Message'), getRef(s, 'Message'), 'same live element keeps its short ref across observations')
   const messageRef = getRef(semanticObservation, 'Message')
   assert.equal(typeof s.can_go_back, 'boolean')
