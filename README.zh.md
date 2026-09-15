@@ -136,7 +136,7 @@ computer { "action": "list_apps" }
 // 2. 读取目标窗口的截图；需要元素索引时显式请求 UIA 文本
 computer { "action": "get_window_state", "window": { "id": 12345, "app": "notepad" }, "include_screenshot": true, "include_text": true }
 
-// 3. 依据状态执行动作（元素 index 来自上一步）
+// 3. 依据状态执行动作；浏览器结果会返回可原样复用的 browser: { endpoint, tab_id } target
 computer { "action": "click", "window": { "id": 12345, "app": "notepad" }, "element_index": 7, "snapshot_id": "<上一步返回的 id>" }
 computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "text": "Hello, PC-Pilot!" }
 
@@ -167,7 +167,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `browser_tabs` / `browser_state` / `browser_observe` / `browser_history` / `browser_back` / `browser_forward` / `browser_wait` | 精确管理标签页；`browser_observe` 返回只含短 ref 的紧凑语义状态，`browser_state` 为兼容性保留原始 token；支持历史前进后退并等待 ready/URL 变化/指定文本 | `browser_endpoint`、`tab_id`?、`include_url`?、`browser_wait_for`? |
 | `browser_events` / `browser_downloads` | 按 `event_cursor` 增量读取 console/network/lifecycle 证据；跟踪 Chromium 下载进度和已落盘文件 | `browser_endpoint`、`tab_id`?、`event_cursor`? |
 | `browser_shutdown` | 仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint` |
-| `browser_click` / `browser_type` / `browser_replace` / `browser_key` | 操作最新 state/observe 返回的原始 token 或紧凑 `@eN` ref；目标过期或身份变化时拒绝 | `browser_endpoint`、`tab_id`、`browser_element` |
+| `browser_click` / `browser_type` / `browser_replace` / `browser_key` | 操作最新 state/observe 返回的原始 token 或紧凑 `@eN` ref；目标过期或身份变化时拒绝 | 优先复用 `browser: { endpoint, tab_id }`，或兼容使用 `browser_endpoint`、`tab_id`；`browser_element` |
 
 #### 动作后验证
 

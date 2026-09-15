@@ -105,7 +105,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 
 1. `computer { action: "list_apps" }` — running apps with pids, exact `app_identity` / `identity_key`, window titles, hwnds and rects.
 2. `computer { action: "get_window_state", window: { id, app }, include_screenshot: true, include_text: true }` — indexed accessibility tree with stable `element_id`, revision/delta metadata, a window screenshot and `snapshot_id`.
-3. Act on the state — element actions include the `snapshot_id` from the same observation. Browser actions can use either the raw `browser_element` token or the short `@eN` ref returned by `browser_state` / `browser_observe`.
+3. Act on the state — element actions include the `snapshot_id` from the same observation. Browser results return a reusable `browser: { endpoint, tab_id }` target that can be passed back unchanged; element actions can use either the raw `browser_element` token or the short `@eN` ref returned by `browser_state` / `browser_observe`.
 4. Observe again only when state is stale/unknown, the target changed, or the next decision needs information you do not already have. Desktop `element_index` values remain bound to the `get_window_state` that produced them.
 
 ### Action reference (55 actions)
@@ -148,7 +148,7 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `element_id` | — | Stable UIA identity returned by `get_window_state`; optional for normal actions, required for safe element remapping during `foreground_once` recovery. |
 | `expect` | — | Optional postcondition: verify window state, accessibility change, element value, text, browser URL/text/readiness, or completed download after the action. |
 | `recovery` | `none` | `foreground_once` retries only a conclusively non-executed `background_unavailable` action. Unknown outcomes are never replayed. |
-| `browser_endpoint` / `tab_id` / `browser_element` / `event_cursor` | — | Explicit loopback DevTools endpoint, exact tab id, semantic token or compact `@eN` ref, and optional cursor for incremental browser evidence. |
+| `browser` / `browser_endpoint` / `tab_id` / `browser_element` / `event_cursor` | — | Prefer the reusable `browser: { endpoint, tab_id }` target returned by PC-Pilot; the separate endpoint/tab fields remain compatible. `browser_element` accepts a raw semantic token or compact `@eN` ref. |
 | `x` / `y` | — | Window-local pixels with `app`/`hwnd`, matching the Computer Use coordinate model; screen coordinates without a target. Set `coordinate_space: "screen"` only for an explicit absolute click. |
 | `button` / `click_count` / `keys` | `left` / `1` / — | Mouse button and legacy click repetitions; `keys` supplies standard keypress chords and mouse modifiers. Foreground mouse actions and validated native-window background clicks preserve the modifier state; unsupported background paths report `background_unavailable`. |
 | `actions` | — | Ordered batch of action objects (maximum 20); execution continues for classified consequential targets and reports the safety class. |

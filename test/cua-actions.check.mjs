@@ -21,7 +21,10 @@ assert.equal(parameters.activate.type, 'boolean', 'launch_app foreground activat
 assert.ok(parameters.include_text, 'computer schema must expose screenshot-first include_text control')
 assert.match(parameters.include_text.description, /default false/i)
 assert.ok(actionEnum.includes('browser_observe'), 'browser_observe must remain model-callable')
+assert.equal(parameters.browser.type, 'object', 'computer schema must expose reusable browser targets')
 assert.match(parameters.browser_element.description, /@eN/, 'browser_element must document compact semantic refs')
+assert.equal(normalizeComputerAction({ action: 'browser_observe', browser: { endpoint: 'ws://127.0.0.1:9222/devtools/browser/test', tab_id: 'tab-1' } }).args.browser_endpoint, 'ws://127.0.0.1:9222/devtools/browser/test')
+assert.equal(normalizeComputerAction({ action: 'browser_observe', browser: { endpoint: 'ws://127.0.0.1:9222/devtools/browser/test', tab_id: 'tab-1' } }).args.tab_id, 'tab-1')
 
 assert.deepEqual(normalizeComputerAction({ action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0 }).args, {
   action: 'scroll', x: 10, y: 20, scrollX: 240, scrollY: 0, scroll_x: 240, scroll_y: 0, amount: 2, direction: 'right',

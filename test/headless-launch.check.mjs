@@ -29,27 +29,28 @@ try {
   assert.equal(launched.headless, true)
   endpoint = launched.browser_endpoint
   assert.ok(endpoint)
+  assert.deepEqual(launched.browser, { endpoint }, 'headless launch returns a reusable browser target')
   const windows = await tool.execute({ action: 'list_windows' })
   assert.equal(windows.ok, true)
   assert.ok(!windows.windows.some(w => Number(w.pid) === launched.pid), 'headless process must not expose a desktop window')
-  const state = await tool.execute({ action: 'browser_state', browser_endpoint: endpoint })
+  const state = await tool.execute({ action: 'browser_state', browser: launched.browser })
   assert.equal(state.ok, true, JSON.stringify(state))
   assert.ok(state.pages.length)
 
   const opened = await tool.execute({
     action: 'browser_open',
-    browser_endpoint: endpoint,
+    browser: launched.browser,
     url: fixtureUrl,
     expect: { type: 'browser_ready', timeout_ms: 5000 },
   })
   assert.equal(opened.ok, true, `browser_open ready postcondition must verify: ${JSON.stringify(opened)}`)
   assert.equal(opened.postcondition?.verified, true)
   const tab = opened.tab_id
+  assert.deepEqual(opened.browser, { endpoint, tab_id: tab }, 'browser_open returns an exact reusable browser target')
 
   const urlCheck = await tool.execute({
     action: 'browser_state',
-    browser_endpoint: endpoint,
-    tab_id: tab,
+    browser: opened.browser,
     expect: { type: 'browser_url', url: fixtureUrl, match: 'exact', timeout_ms: 1000 },
   })
   assert.equal(urlCheck.ok, true, `browser URL postcondition must verify: ${JSON.stringify(urlCheck)}`)
@@ -57,8 +58,7 @@ try {
 
   const textCheck = await tool.execute({
     action: 'browser_read',
-    browser_endpoint: endpoint,
-    tab_id: tab,
+    browser: opened.browser,
     expect: { type: 'browser_text', text: 'POSTCONDITION READY', timeout_ms: 5000 },
   })
   assert.equal(textCheck.ok, true, `browser text postcondition must verify: ${JSON.stringify(textCheck)}`)
@@ -66,15 +66,14 @@ try {
 
   const textMiss = await tool.execute({
     action: 'browser_read',
-    browser_endpoint: endpoint,
-    tab_id: tab,
+    browser: opened.browser,
     expect: { type: 'browser_text', text: '__MISSING_BROWSER_POSTCONDITION__', timeout_ms: 0 },
   })
   assert.equal(textMiss.ok, false)
   assert.equal(textMiss.error_code, 'postcondition_failed')
   assert.equal(textMiss.postcondition?.verified, false)
 
-  const shutdown = await tool.execute({ action: 'browser_shutdown', browser_endpoint: endpoint })
+  const shutdown = await tool.execute({ action: 'browser_shutdown', browser: launched.browser })
   assert.equal(shutdown.ok, true, JSON.stringify(shutdown))
   assert.equal(shutdown.browser_closed, true, JSON.stringify(shutdown))
   endpoint = undefined

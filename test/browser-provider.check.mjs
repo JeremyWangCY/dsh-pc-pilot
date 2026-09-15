@@ -21,15 +21,41 @@ const runtime = createPcPilotRuntime({ browserProvider: provider })
 try {
   assert.equal(runtime.status().providers.browser, 'test-browser-provider')
 
+  const browser = { endpoint: 'ws://127.0.0.1:9222/devtools/browser/test' }
   const result = await runtime.act('browser_tabs', {
-    browser_endpoint: 'ws://127.0.0.1:9222/devtools/browser/test',
+    browser,
     future_field: 'kept',
   })
   assert.equal(result.ok, true)
   assert.equal(result.provider_marker, 'kept')
   assert.equal(calls.length, 1)
   assert.equal(calls[0].action, 'browser_tabs')
+  assert.equal(calls[0].args.browser_endpoint, browser.endpoint)
   assert.equal(calls[0].args.future_field, 'kept')
+  assert.deepEqual(result.browser, browser)
+
+  const observed = await runtime.act('browser_observe', {
+    browser: { ...browser, tab_id: 'tab-1' },
+  })
+  assert.equal(calls.at(-1).args.browser_endpoint, browser.endpoint)
+  assert.equal(calls.at(-1).args.tab_id, 'tab-1')
+  assert.deepEqual(observed.browser, { ...browser, tab_id: 'tab-1' })
+
+  const batchStart = calls.length
+  const batch = await runtime.run({
+    browser: { ...browser, tab_id: 'tab-1' },
+    actions: [
+      { action: 'browser_observe' },
+      { action: 'browser_read' },
+    ],
+  })
+  assert.equal(batch.ok, true)
+  assert.equal(batch.completed_count, 2)
+  assert.equal(calls.length, batchStart + 2)
+  for (const call of calls.slice(batchStart)) {
+    assert.equal(call.args.browser_endpoint, browser.endpoint)
+    assert.equal(call.args.tab_id, 'tab-1')
+  }
 
   const uncertainCalls = []
   const uncertain = createPcPilotRuntime({
