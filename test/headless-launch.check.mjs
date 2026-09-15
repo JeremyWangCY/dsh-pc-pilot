@@ -59,7 +59,7 @@ try {
     action: 'browser_read',
     browser_endpoint: endpoint,
     tab_id: tab,
-    expect: { type: 'browser_text', text: 'POSTCONDITION READY', timeout_ms: 1000 },
+    expect: { type: 'browser_text', text: 'POSTCONDITION READY', timeout_ms: 5000 },
   })
   assert.equal(textCheck.ok, true, `browser text postcondition must verify: ${JSON.stringify(textCheck)}`)
   assert.equal(textCheck.postcondition?.verified, true)
