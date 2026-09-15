@@ -32,4 +32,12 @@ const requiredPointFields = props.path.items.required || Object.entries(props.pa
 assert.deepEqual(requiredPointFields, ['x', 'y'])
 assert.equal(props.screenshot_path.type, 'string')
 
+const guardedHostContext = new Proxy({}, {
+  get(_target, property) {
+    throw new Error(`cannot get property "${String(property)}" without inject`)
+  },
+})
+assert.doesNotThrow(() => defineComputerTool(undefined, guardedHostContext),
+  'tool definition must not probe optional uninjected host services')
+
 console.log('Gemini tool schema compatibility check PASSED')

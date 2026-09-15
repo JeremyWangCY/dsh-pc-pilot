@@ -1,6 +1,6 @@
 {
   "name": "dsh-pc-pilot",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "PC-Pilot - lightweight Windows + Chromium computer-use runtime, CLI, and DeepSeek Harness host plugin.",
   "type": "module",
   "main": "lib/index.js",
@@ -88,5 +88,13 @@
   "engines": {
     "node": ">=22.12"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib",
+    "test": "test"
+  },
+  "bugs": {
+    "url": "https://github.com/JeremyWangCY/dsh-pc-pilot/issues"
+  }
 }
