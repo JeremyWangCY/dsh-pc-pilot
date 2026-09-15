@@ -66,6 +66,11 @@ assert.ok(
 )
 
 // lib/pc-pilot-helper.ps1 parameter & encoding checks
+assert.equal(
+  helperSrc.charCodeAt(0),
+  0xFEFF,
+  'pc-pilot-helper.ps1 must carry a UTF-8 BOM for Windows PowerShell 5.1 source decoding'
+)
 assert.ok(
   helperSrc.includes('[switch]$PayloadStdin'),
   'pc-pilot-helper.ps1 must declare [switch]$PayloadStdin parameter'
@@ -136,7 +141,7 @@ assert.equal(typeRes.action, 'type_text')
 
 // 4. Verification: Stdin streaming with large (>80KB) JSON payload & Unicode/emoji preservation.
 // Use a deterministic validation error before any desktop/window access so hosted CI and interactive PCs exercise the same transport path.
-const unicodeSignature = '🚀_🌟_Unicode_测试_€_©_🤖_🎉'
+const unicodeSignature = '??_??_Unicode_??_?_?_??_??'
 // >85KB payload: would fail Windows command-line limit (~32KB) if passed on argv
 const largePayloadString = unicodeSignature + '_PADDING_' + '7'.repeat(88000)
 

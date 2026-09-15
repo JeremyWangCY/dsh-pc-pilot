@@ -15,7 +15,9 @@ if (packaged) {
   console.error('build-helper: native/helper sources not packaged; cannot rebuild helper')
   process.exit(1)
 }
-const output = names.map(name => fs.readFileSync(path.join(nativeDir, `${name}.ps1`), 'utf8')).join('')
+// Windows PowerShell 5.1 treats UTF-8 .ps1 files without a BOM as the active ANSI code page.
+// The helper contains intentional Unicode source text, so emit UTF-8 with BOM to make parsing deterministic on every Windows host.
+const output = '\uFEFF' + names.map(name => fs.readFileSync(path.join(nativeDir, `${name}.ps1`), 'utf8').replace(/^\uFEFF/, '')).join('')
 if (process.argv.includes('--check')) {
   if (fs.readFileSync(target, 'utf8') !== output) throw new Error('Helper bundle stale: run npm run build:helper')
 } else fs.writeFileSync(target, output)
