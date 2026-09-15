@@ -16,6 +16,7 @@ assert.ok(paths.has('lib/wgc/dsh-pc-pilot-wgc.exe'), 'runtime WGC executable mus
 assert.ok(paths.has('bin/pc-pilot.js'), 'standalone pc-pilot CLI must be packaged')
 assert.ok(paths.has('lib/runtime.js'), 'standalone runtime API must be packaged')
 assert.ok(paths.has('lib/cli.js'), 'CLI implementation must be packaged')
+assert.ok(paths.has('lib/browser-provider.js'), 'browser provider interface must be packaged')
 assert.ok(!paths.has('lib/wgc/dsh-pc-pilot-wgc.pdb'), 'debug PDB must not be packaged')
 for (const file of paths) {
   assert.ok(!file.startsWith('artifacts/'), `diagnostic artifact must not be packaged: ${file}`)

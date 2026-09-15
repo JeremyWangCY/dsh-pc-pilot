@@ -93,6 +93,8 @@ pc.close()
 
 The runtime returns the core outcome unchanged. In particular, `outcome: "unknown"` is evidence for the agent to inspect state; the CLI does not turn it into an automatic replay.
 
+The browser backend is also a small injectable provider rather than a second policy layer. The default provider keeps the current persistent CDP session implementation; alternate providers only need an `execute(action, args, signal)` function. This leaves room for a BrowserSkill-compatible backend without forcing its workflow onto every agent.
+
 ## Status pill
 
 While the overlay is enabled (default), each first action launches two tiny resident PowerShell loops from the helper directory: the virtual-cursor indicator and the frosted status pill. They read a state file under `%TEMP%\dsh-cua` — the pill is visible top-center while activity is fresh (≤ 4 s) and fades out afterwards; both processes idle-exit after 120 s and respawn on demand. No driver, no UAC, no display changes — PC-Pilot runs entirely on the user's real desktop, in the background.

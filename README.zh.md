@@ -106,6 +106,8 @@ pc.close()
 
 Runtime 原样返回 core 的 outcome。尤其是 `outcome: "unknown"`，它代表 Agent 应先检查当前状态，而不是由 CLI 擅自重放动作。
 
+Browser 后端同样只是一个可注入的轻量 provider，而不是第二套策略层。默认 provider 继续使用当前 persistent CDP session；其他后端只需实现 `execute(action, args, signal)`。这样以后可以接 BrowserSkill-compatible backend，但不会强迫所有 Agent 遵循同一套固定工作流。
+
 ### 状态条与光标指示器
 
 overlay 默认开启（`overlay: true`）。每个动作序列的第一次活动会让 helper 拉起两个常驻低频 PowerShell 循环（`virtual-cursor-overlay.ps1` 与 `pcpilot-statusbar.ps1`），它们轮询 `%TEMP%\dsh-cua` 下的状态文件：
