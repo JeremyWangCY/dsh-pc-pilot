@@ -2,6 +2,8 @@ name: Publish npm
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
 
@@ -39,4 +41,5 @@ jobs:
         run: npm test
 
       - name: Publish
+        if: github.ref_type == 'tag'
         run: npm publish --access public

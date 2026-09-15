@@ -52,8 +52,13 @@ assert.ok(
   "lib/index.js spawn arguments must not pass '-PayloadJson'"
 )
 assert.ok(
-  indexSrc.includes("child.stdin.end(JSON.stringify(args || {}), 'utf8')"),
-  'lib/index.js must stream serialized JSON via child.stdin.end'
+  indexSrc.includes("child.stdin.end(stringifyHelperJson(args || {}), 'ascii')"),
+  'lib/index.js must stream ASCII-safe JSON via child.stdin.end'
+)
+assert.ok(
+  indexSrc.includes('function stringifyHelperJson(value)')
+    && indexSrc.includes("padStart(4, '0')"),
+  'lib/index.js must escape non-ASCII JSON code units for Windows PowerShell 5.1'
 )
 assert.ok(
   indexSrc.includes("child.stdin.on('error'"),
