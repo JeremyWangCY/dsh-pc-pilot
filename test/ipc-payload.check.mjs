@@ -155,6 +155,7 @@ if (!transportProbeValidated) {
     errorCode: streamRes.error_code,
     outcome: streamRes.outcome,
     exitCode: streamRes.exitCode,
+    stderrPrefix: typeof streamRes.stderr === 'string' ? streamRes.stderr.slice(0, 1200) : '',
     keys: Object.keys(streamRes),
   }))
 }
