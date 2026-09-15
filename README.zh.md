@@ -44,7 +44,7 @@
 | 标准动作词汇 | 同时接受常见 computer-use `double_click` / `type` / `keypress.keys` / `move` 与 Windows canonical `click` / `type_text` / `press_key` / `mouse_move`；支持 `scroll_x/scroll_y`、`drag.path`、三击和窗口级后台操作 |
 | O(1) 元素拾取 | `get_window_state` 在常驻 helper 守护进程内缓存 UIA 元素列表，`click { element_index }` / `set_value` / `perform_secondary_action` / `select_text` / `type_text` 直接 O(1) 命中，不再二次整树遍历 |
 | 真实应用就绪诊断 | 请求 `include_text: true` 时，`accessibility.status` / `accessibility_status` 区分 `available`、`partial` 与 `unavailable`；现代 WinUI/UWP 应用尚未暴露 UIA 树时，明确提示等待重观察或在授权时改走截图绑定的前台路径，绝不虚构元素索引 |
-| 遮挡免疫截图链 | 优先使用随包的 Windows Graphics Capture 按 HWND 抓取目标内容，失败时降级 `PrintWindow` 多旗标阶梯——两级都要求窗口自己渲染帧，遮挡物永远进不了截图；**刻意不提供屏幕 DC 降级**：两级都失败时返回可读的 `screenshot_black` 错误，而不是把遮挡窗口当作目标。没有 .NET 8 时仍可用 `PrintWindow` 路径 |
+| 遮挡免疫截图链 | 优先使用随包的 Windows Graphics Capture 按 HWND 抓取目标内容，并为每个 HWND 复用有界的 `GraphicsCaptureItem + FramePool + CaptureSession` 捕获槽；尺寸变化只重建 frame pool，窗口关闭、捕获异常或长时间空闲时回收该槽。失败时降级 `PrintWindow` 多旗标阶梯——两级都要求窗口自己渲染帧，遮挡物永远进不了截图；**刻意不提供屏幕 DC 降级**。没有 .NET 8 时仍可用 `PrintWindow` 路径 |
 | 按任务判断 dispatch | `foreground`（真实 SendInput）作为逃生舱口；工具指引要求模型保持 background 默认、切换时明确说明、不静默循环重试 |
 | 虚拟光标指示器 | `UpdateLayeredWindow` + `CreateDIBSection` 逐像素透明分层窗口：黑描边圆润白箭头 + 柔和蓝色径向光晕；`WS_EX_TRANSPARENT` 点击穿透、`WS_EX_NOACTIVATE` + `SW_SHOWNOACTIVATE` 永不抢焦点、置顶显示 |
 | 3 秒自动隐藏 | 最后一个动作 3 秒后光标自动消失（即 AI 本轮输出结束光标随之关闭），下一个动作再出现 |

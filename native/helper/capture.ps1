@@ -70,10 +70,11 @@ function Get-WgcCaptureServer {
 }
 
 function Invoke-WgcCapture {
-  # Keep one .NET 8 WGC bridge alive for the PowerShell helper lifetime. Reusing
-  # its D3D11/WinRT device removes process + GPU-device setup from every frame.
-  # A broken bridge is discarded; this frame falls back to PrintWindow and the
-  # next observation starts a fresh bridge.
+  # Keep one .NET 8 WGC bridge alive for the PowerShell helper lifetime. The
+  # bridge reuses a bounded capture slot (GraphicsCaptureItem + frame pool +
+  # capture session) per HWND, so repeated observations avoid recreating WGC
+  # state. Broken slots are evicted in the bridge; a broken bridge process is
+  # discarded here and the frame falls back to PrintWindow.
   param([IntPtr]$Hwnd, [string]$Path)
   $safePath = ([string]$Path).Replace('"', '').Replace([string][char]9, '').Replace([string][char]13, '').Replace([string][char]10, '')
   $proc = Get-WgcCaptureServer

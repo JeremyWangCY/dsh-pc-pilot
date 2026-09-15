@@ -22,6 +22,7 @@ static class Native
     [DllImport("combase.dll")] public static extern int WindowsDeleteString(IntPtr hstring);
     [DllImport("combase.dll")] public static extern int RoGetActivationFactory(IntPtr hstring, ref Guid iid, out IntPtr factory);
     [DllImport("d3d11.dll")] public static extern int CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool IsWindow(IntPtr hwnd);
 }
 
 static class Program
@@ -67,41 +68,145 @@ static class Program
         return WinRT.MarshalInterface<IDirect3DDevice>.FromAbi(nativeDevice);
     }
 
-    private static async Task<(int Width, int Height)> CaptureAsync(long hwndValue, string outputPath)
+    private sealed class CaptureSlot : IDisposable
     {
-        var item = CreateItem(new IntPtr(hwndValue));
-        var d3d = CreateWinRtDevice();
-        using var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(d3d, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, item.Size);
-        using var session = pool.CreateCaptureSession(item);
-        session.StartCapture();
+        private readonly long hwndValue;
+        private readonly GraphicsCaptureItem item;
+        private readonly IDirect3DDevice d3d;
+        private readonly Direct3D11CaptureFramePool pool;
+        private readonly GraphicsCaptureSession session;
+        private int width;
+        private int height;
+        private bool disposed;
 
-        Direct3D11CaptureFrame? frame = null;
-        var timer = Stopwatch.StartNew();
-        while (frame is null && timer.ElapsedMilliseconds < 2500)
-        {
-            frame = pool.TryGetNextFrame();
-            if (frame is null) Thread.Sleep(8);
-        }
-        if (frame is null) throw new TimeoutException("WGC frame timeout");
+        public DateTime LastUsedUtc { get; private set; } = DateTime.UtcNow;
 
-        using (frame)
-        using (var bitmap = await SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface))
-        using (var stream = new InMemoryRandomAccessStream())
+        public CaptureSlot(long hwndValue)
         {
-            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-            encoder.SetSoftwareBitmap(bitmap);
-            await encoder.FlushAsync();
-            stream.Seek(0);
-            using var reader = new DataReader(stream.GetInputStreamAt(0));
-            var length = checked((uint)stream.Size);
-            await reader.LoadAsync(length);
-            var bytes = new byte[length];
-            reader.ReadBytes(bytes);
-            var fullPath = Path.GetFullPath(outputPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-            File.WriteAllBytes(fullPath, bytes);
-            return (bitmap.PixelWidth, bitmap.PixelHeight);
+            this.hwndValue = hwndValue;
+            var hwnd = new IntPtr(hwndValue);
+            if (!Native.IsWindow(hwnd)) throw new ArgumentException("WGC target window no longer exists");
+
+            item = CreateItem(hwnd);
+            d3d = CreateWinRtDevice();
+            width = item.Size.Width;
+            height = item.Size.Height;
+            if (width <= 0 || height <= 0) throw new InvalidOperationException("WGC target has invalid size");
+
+            pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                d3d,
+                DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                2,
+                item.Size);
+            session = pool.CreateCaptureSession(item);
+            session.StartCapture();
         }
+
+        private void RefreshSize()
+        {
+            var size = item.Size;
+            if (size.Width <= 0 || size.Height <= 0) throw new InvalidOperationException("WGC target has invalid size");
+            if (size.Width == width && size.Height == height) return;
+            pool.Recreate(d3d, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, size);
+            width = size.Width;
+            height = size.Height;
+        }
+
+        public async Task<(int Width, int Height)> CaptureAsync(string outputPath)
+        {
+            if (disposed) throw new ObjectDisposedException(nameof(CaptureSlot));
+            if (!Native.IsWindow(new IntPtr(hwndValue))) throw new ArgumentException("WGC target window no longer exists");
+            RefreshSize();
+
+            Direct3D11CaptureFrame? frame = null;
+            Direct3D11CaptureFrame? queued;
+            while ((queued = pool.TryGetNextFrame()) is not null)
+            {
+                frame?.Dispose();
+                frame = queued;
+            }
+
+            var timer = Stopwatch.StartNew();
+            while (frame is null && timer.ElapsedMilliseconds < 2500)
+            {
+                frame = pool.TryGetNextFrame();
+                if (frame is null) Thread.Sleep(8);
+            }
+            if (frame is null) throw new TimeoutException("WGC frame timeout");
+
+            using (frame)
+            using (var bitmap = await SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface))
+            using (var stream = new InMemoryRandomAccessStream())
+            {
+                var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+                encoder.SetSoftwareBitmap(bitmap);
+                await encoder.FlushAsync();
+                stream.Seek(0);
+                using var reader = new DataReader(stream.GetInputStreamAt(0));
+                var length = checked((uint)stream.Size);
+                await reader.LoadAsync(length);
+                var bytes = new byte[length];
+                reader.ReadBytes(bytes);
+                var fullPath = Path.GetFullPath(outputPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+                File.WriteAllBytes(fullPath, bytes);
+                LastUsedUtc = DateTime.UtcNow;
+                return (bitmap.PixelWidth, bitmap.PixelHeight);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            try { session.Dispose(); } catch { }
+            try { pool.Dispose(); } catch { }
+            try { (d3d as IDisposable)?.Dispose(); } catch { }
+        }
+    }
+
+    private static readonly Dictionary<long, CaptureSlot> captureSlots = new();
+    private static readonly TimeSpan captureSlotIdle = TimeSpan.FromSeconds(60);
+    private const int MaxCaptureSlots = 8;
+
+    private static void RemoveCaptureSlot(long hwndValue)
+    {
+        if (!captureSlots.Remove(hwndValue, out var slot)) return;
+        slot.Dispose();
+    }
+
+    private static void PruneCaptureSlots()
+    {
+        var cutoff = DateTime.UtcNow - captureSlotIdle;
+        foreach (var pair in captureSlots.ToArray())
+        {
+            if (!Native.IsWindow(new IntPtr(pair.Key)) || pair.Value.LastUsedUtc < cutoff)
+                RemoveCaptureSlot(pair.Key);
+        }
+    }
+
+    private static CaptureSlot GetCaptureSlot(long hwndValue)
+    {
+        if (!Native.IsWindow(new IntPtr(hwndValue)))
+        {
+            RemoveCaptureSlot(hwndValue);
+            throw new ArgumentException("WGC target window no longer exists");
+        }
+        if (captureSlots.TryGetValue(hwndValue, out var existing)) return existing;
+        while (captureSlots.Count >= MaxCaptureSlots)
+        {
+            var oldest = captureSlots.OrderBy(pair => pair.Value.LastUsedUtc).First();
+            RemoveCaptureSlot(oldest.Key);
+        }
+        var created = new CaptureSlot(hwndValue);
+        captureSlots[hwndValue] = created;
+        return created;
+    }
+
+    private static async Task<(int Width, int Height)> CaptureOnceAsync(long hwndValue, string outputPath)
+    {
+        using var slot = new CaptureSlot(hwndValue);
+        return await slot.CaptureAsync(outputPath);
     }
 
     private static async Task<int> RunServerAsync()
@@ -112,27 +217,38 @@ static class Program
         Console.InputEncoding = new System.Text.UTF8Encoding(false);
         Console.OutputEncoding = new System.Text.UTF8Encoding(false);
 
-        string? line;
-        while ((line = await Console.In.ReadLineAsync()) is not null)
+        try
         {
-            line = line.TrimStart('\uFEFF');
-            var parts = line.Split('\t', 2);
-            if (parts.Length != 2 || !long.TryParse(parts[0], out var hwndValue) || string.IsNullOrWhiteSpace(parts[1]))
+            string? line;
+            while ((line = await Console.In.ReadLineAsync()) is not null)
             {
-                Console.WriteLine("ERR invalid_request");
-                continue;
+                line = line.TrimStart('\uFEFF');
+                var parts = line.Split('\t', 2);
+                if (parts.Length != 2 || !long.TryParse(parts[0], out var hwndValue) || string.IsNullOrWhiteSpace(parts[1]))
+                {
+                    Console.WriteLine("ERR invalid_request");
+                    continue;
+                }
+
+                PruneCaptureSlots();
+                try
+                {
+                    var slot = GetCaptureSlot(hwndValue);
+                    var result = await slot.CaptureAsync(parts[1]);
+                    Console.WriteLine($"OK {result.Width} {result.Height}");
+                }
+                catch (Exception error)
+                {
+                    RemoveCaptureSlot(hwndValue);
+                    Console.WriteLine("ERR " + error.GetType().Name + " " + error.Message.Replace('\r', ' ').Replace('\n', ' '));
+                }
             }
-            try
-            {
-                var result = await CaptureAsync(hwndValue, parts[1]);
-                Console.WriteLine($"OK {result.Width} {result.Height}");
-            }
-            catch (Exception error)
-            {
-                Console.WriteLine("ERR " + error.GetType().Name + " " + error.Message.Replace('\r', ' ').Replace('\n', ' '));
-            }
+            return 0;
         }
-        return 0;
+        finally
+        {
+            foreach (var hwndValue in captureSlots.Keys.ToArray()) RemoveCaptureSlot(hwndValue);
+        }
     }
 
     public static async Task<int> Main(string[] args)
@@ -146,7 +262,7 @@ static class Program
 
         try
         {
-            var result = await CaptureAsync(hwndValue, args[1]);
+            var result = await CaptureOnceAsync(hwndValue, args[1]);
             Console.WriteLine($"{result.Width} {result.Height}");
             return 0;
         }
