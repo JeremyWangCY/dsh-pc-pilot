@@ -88,13 +88,5 @@
   "engines": {
     "node": ">=22.12"
   },
-  "license": "MIT",
-  "directories": {
-    "doc": "docs",
-    "lib": "lib",
-    "test": "test"
-  },
-  "bugs": {
-    "url": "https://github.com/JeremyWangCY/dsh-pc-pilot/issues"
-  }
+  "license": "MIT"
 }
