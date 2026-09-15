@@ -12,7 +12,7 @@
 
 **PC-Pilot 只面向同一交互式 Windows 会话：用户正常工作，AI 尽量走不抢焦点的后台路径。** 浏览器优先 CDP；桌面优先 UIA、目标窗口消息、WGC / PrintWindow。虚拟机、第二桌面或隐藏的另一套 Windows 会话不属于 PC-Pilot 的架构。某个应用如果确实依赖真实前台 SendInput，就应准确返回后台不支持，而不是假装能保证用户与 AI 的键鼠完全独立。
 
-优化优先级：**浏览器批量/局部观察 → UIA 缓存与能力路由 → WGC 会话复用 → 条件批处理 → 高频软件专用适配。** 截图能力和后台输入能力分别验证：能稳定抓到窗口画面，不代表这个应用也能可靠接收后台输入。
+优化优先级：**浏览器批量/局部观察 → UIA 缓存与能力路由 → WGC 会话复用 → 条件批处理。** 截图能力和后台输入能力分别验证：能稳定抓到窗口画面，不代表这个应用也能可靠接收后台输入。具体软件的对象模型、自动化 API 和业务集成由其他插件负责，不进入 PC-Pilot core。
 
 **PC-Pilot（`dsh-pc-pilot`）** 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）宿主插件，让 AI 模型通过单一 `computer` 工具观察并操作本地 Windows 桌面。
 
@@ -33,7 +33,7 @@
 | 单工具全桌面加浏览器 | 桌面动作直接采用 Windows Computer Use 标准名称：`list_apps` / `list_windows` / `get_window` / `launch_app` / `get_window_state` / `click` / `press_key` / `type_text` / `scroll` / `drag` / `set_value` / `perform_secondary_action` / `activate_window` |
 | 轻量条件批处理 | 支持最多 20 个有序 `actions`；每一步可用 `when` 做执行前门控、用 `expect` 做执行后验证，首个条件不满足/失败/不确定步骤立即停止。`when` 默认只检查当前状态一次（`timeout_ms: 0`），不满足时绝不派发动作；不提供分支 DSL，也不会隐藏重试 |
 | 结构化安全分类 | 检测到明显的提交、发布、购买、删除、认证或敏感浏览器字段时标记 `safety.class=consequential`；当前 pc-pilot 不拦截执行，后续可由宿主接入确认策略 |
-| 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
+| 后台优先输入与能力路由 | 观察阶段按窗口/控件缓存 UIA `Invoke` / `Value` / `Toggle` / `Selection` / `ExpandCollapse` / `Scroll` / `RangeValue` 能力；已知不支持的路径不会每步重复试错。传统控件使用经过验证的目标窗口 `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 路径，且不会因为窗口被遮挡就命中前台遮挡物 |
 | 观察快照绑定 | `get_window_state` 返回 `snapshot_id`；元素动作必须携带同一快照，快照过期、窗口移动、元素身份变化或动作消费后都会拒绝；未经验证的后台坐标点击不会回退到可能错误的控件 |
 | 持久浏览器会话 | 每个 AI 隔离浏览器 endpoint 复用一条有界 CDP WebSocket，并复用每个 tab 的 CDP session，不再每个动作重连；`browser_tabs`、`browser_history`、`browser_back` / `browser_forward`、条件式 `browser_wait` 提供会话级导航；`browser_events` 用游标返回新的 console/network/lifecycle 证据，`browser_downloads` 跟踪下载进度与已落盘文件。截图使用独立的非致命超时，慢截图不会误杀健康浏览器会话；`browser_state` 为兼容性保留原始 token 与紧凑 `@eN` ref，`browser_observe` 则默认只返回短 ref、不把 UUID 噪声送进 Agent 上下文；两者都严格绑定 tab/document/name/role，click / type / replace / key 两种形式都可使用，且绝不附着用户自己的浏览器 |
 | UIA 稳定身份与增量状态 | `include_text: true` 时每个控件增加稳定 `element_id`，并返回单调递增的 `accessibility_revision` 与 `accessibility_delta`（新增/删除/变化/未变化计数）。原有 `element_index + snapshot_id` 动作契约不变；stable id 只帮助跨观察推理，不绕过快照过期检查 |

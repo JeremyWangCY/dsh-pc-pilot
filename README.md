@@ -15,7 +15,7 @@ While acting, the model moves a small **on-screen cursor indicator** (a rounded 
 
 **PC-Pilot targets one interactive Windows session: the user keeps working normally while the AI prefers background-safe paths.** Browser CDP, UIA patterns, target-window messages, WGC and PrintWindow are used to avoid focus theft whenever the application supports them. Virtual machines, a second desktop, or a hidden alternate Windows session are not part of the architecture. If an application truly requires real foreground SendInput, PC-Pilot reports that its background path is unavailable rather than pretending independent user/AI input can be guaranteed.
 
-Optimization priority: **browser batched/local observation → UIA caching and capability routing → reusable WGC capture sessions → conditional batching → dedicated adapters for high-value applications.** Capture support and background-input support are evaluated separately: being able to capture a covered window does not imply that the same application can accept safe background input.
+Optimization priority: **browser batched/local observation → UIA caching and capability routing → reusable WGC capture sessions → conditional batching.** Capture support and background-input support are evaluated separately: being able to capture a covered window does not imply that the same application can accept safe background input. Application-specific object models, automation APIs, and domain integrations belong in separate plugins rather than PC-Pilot core.
 
 ## Features
 
