@@ -63,7 +63,12 @@ try {
     const child = children[0]
     if (event === 'timeout') [...timers].find(t => t.ms === 30000).fn()
     if (event === 'abort') controller.abort()
-    if (event === 'stdin-error') child.stdin.emit('error', new Error('EPIPE'))
+    if (event === 'stdin-error') {
+      child.stdin.emit('error', new Error('EPIPE'))
+      const grace = [...timers].find(t => t.ms === 250)
+      assert.ok(grace, 'stdin error must arm a bounded grace timer')
+      grace.fn()
+    }
     if (event === 'error') child.emit('error', new Error('lost process'))
     if (event === 'empty-close') child.emit('close', 1)
     unknown(await settled(p))
@@ -71,6 +76,16 @@ try {
     child.stdout.emit('data', Buffer.from('{"ok":true}'))
     child.emit('close', 0)
     unknown(await p)
+  })
+  await check('one-shot stdin-error grace accepts completed JSON', async m => {
+    const p = m.runAction('click', {})
+    await flush()
+    const child = children[0]
+    child.stdin.emit('error', new Error('EOF'))
+    child.stdout.emit('data', Buffer.from('{"ok":true,"action":"click"}'))
+    child.emit('close', 0)
+    assert.deepEqual(await p, { ok: true, action: 'click' })
+    assert.equal(timers.size, 0)
   })
   for (const event of ['close', 'error', 'stdin-error', 'write-throw', 'timeout', 'abort', 'stop']) await check(`daemon ${event}: no replay`, async m => {
     const controller = new AbortController()
