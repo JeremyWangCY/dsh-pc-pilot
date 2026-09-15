@@ -112,7 +112,7 @@ await page.act('browser_click', { browser_element: observed.elements[0].ref })
 pc.close()
 ```
 
-Runtime 原样返回 core 的 outcome。尤其是 `outcome: "unknown"`，它代表 Agent 应先检查当前状态，而不是由 CLI 擅自重放动作。`runtime.bind(defaults)` 只是浅层 target/default 绑定便利层：单次调用字段优先，嵌套 `window` / `browser` target 会合并，不会背着 Agent 增加 lifecycle、导航、观察或重试。
+Runtime 原样返回 core 的 outcome。尤其是 `outcome: "unknown"`，它代表 Agent 应先检查当前状态，而不是由 CLI 擅自重放动作。`runtime.bind(defaults)` 只是浅层请求便利层：单次调用字段优先，嵌套 `window` / `browser` target 会合并，不创建 session daemon，也不会背着 Agent 增加 lifecycle、页面选择、观察、导航或重试。
 
 Browser 后端同样只是一个可注入的轻量 provider，而不是第二套策略层。默认 provider 继续使用当前 persistent CDP session；其他后端只需实现 `execute(action, args, signal)`。这样以后可以接 BrowserSkill-compatible backend，但不会强迫所有 Agent 遵循同一套固定工作流。
 
@@ -151,7 +151,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 // 4. 只有状态 stale/unknown、目标变化或下一步缺少信息时再观察；桌面元素 index 仍只对产生它的那次 get_window_state 有效
 ```
 
-### 动作参考（55 个动作）
+### 动作参考（56 个动作）
 
 | 动作 | 用途 | 关键参数 |
 | --- | --- | --- |
@@ -176,6 +176,7 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `browser_events` / `browser_downloads` | 按 `event_cursor` 增量读取 console/network/lifecycle 证据；跟踪 Chromium 下载进度和已落盘文件 | `browser_endpoint`、`tab_id`?、`event_cursor`? |
 | `browser_shutdown` | 仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint` |
 | `browser_click` / `browser_type` / `browser_replace` / `browser_key` | 操作最新 state/observe 返回的原始 token 或紧凑 `@eN` ref；目标过期或身份变化时拒绝 | 优先复用 `browser: { endpoint, tab_id }`，或兼容使用 `browser_endpoint`、`tab_id`；`browser_element` |
+| `browser_upload` | 把 1–20 个明确的绝对本地文件路径选择到已观察到的 `<input type=file>`，并验证浏览器确实收到；不会替 Agent 提交外围表单 | `browser`、`browser_element`、`files` |
 
 #### 动作后验证
 

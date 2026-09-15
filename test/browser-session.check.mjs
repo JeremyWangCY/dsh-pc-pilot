@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -31,6 +31,7 @@ const server = http.createServer(async (req, res) => {
   res.end(`<!doctype html><meta charset="utf-8"><form>
     <label>Message<input id="message" value="DO_NOT_EXPOSE_VALUE"></label>
     <input aria-label="Password" type="password" value="DO_NOT_EXPOSE_PASSWORD">
+    <input aria-label="Upload fixture" id="upload" type="file" multiple>
     <button type="button" id="like" aria-label="Like ${likes}">Like</button>
     <button type="button" id="rename">Rename</button>
     <button type="button" id="remove">Remove</button>
@@ -63,6 +64,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(0, '127.0.0.1')
 await once(server, 'listening')
 const profile = await mkdtemp(path.join(tmpdir(), 'pc-pilot-cdp-'))
+const uploadFixture = path.join(profile, 'upload-fixture.txt')
+await writeFile(uploadFixture, 'pc-pilot upload fixture', 'utf8')
 let child
 let control
 let controlId = 0
@@ -130,6 +133,13 @@ try {
   assert.ok(s.elements.every(item => typeof item.element === 'string' && item.element), 'browser_state preserves raw element tokens for compatibility')
   assert.equal(getRef(semanticObservation, 'Message'), getRef(s, 'Message'), 'same live element keeps its short ref across observations')
   const messageRef = getRef(semanticObservation, 'Message')
+  const uploadRef = getRef(semanticObservation, 'Upload fixture')
+  await assert.rejects(browserAction('browser_upload', { ...args, element: uploadRef, files: ['relative.txt'] }), /absolute file paths/)
+  await assert.rejects(browserAction('browser_upload', { ...args, element: messageRef, files: [uploadFixture] }), /file input/)
+  const uploaded = await browserAction('browser_upload', { ...args, element: uploadRef, files: [uploadFixture] })
+  assert.equal(uploaded.ok, true)
+  assert.equal(uploaded.uploaded_count, 1)
+  assert.ok(uploaded.screenshot?.path && existsSync(uploaded.screenshot.path), 'browser upload returns a fresh screenshot')
   assert.equal(typeof s.can_go_back, 'boolean')
   assert.equal(typeof s.can_go_forward, 'boolean')
   const initialBrowserSession = s.browser_session_id
