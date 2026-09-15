@@ -207,6 +207,19 @@ function Get-ProcessIdentityFast {
   return $copy
 }
 
+function Get-ProcessDiscoveryIdentity {
+  param([uint32]$ProcessId)
+
+  $identity = Get-ProcessIdentityFast -ProcessId $ProcessId
+  $discovery = [ordered]@{}
+  foreach ($key in $identity.Keys) {
+    if ($key -notin @('publisher', 'signature_status', 'signer_subject', 'signer_thumbprint')) {
+      $discovery[$key] = $identity[$key]
+    }
+  }
+  return $discovery
+}
+
 function Get-CandidateWindows {
   # Shared candidate filtering for Resolve-TargetWindow and list_windows:
   # matches pid / window-title substring / process name, drops off-screen ghosts.

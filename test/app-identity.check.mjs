@@ -23,10 +23,26 @@ for (const app of appsResult.apps) {
   assert.equal(typeof id.process_name, 'string')
   assert.equal(typeof id.parent_pid, 'number')
   assert.equal(typeof id.process_tree_root_pid, 'number')
-  assert.equal(id.signature_status, 'not_checked')
+  for (const signatureField of ['publisher', 'signature_status', 'signer_subject', 'signer_thumbprint']) {
+    assert.equal(id[signatureField], undefined,
+      `list_apps discovery identity must omit ${signatureField}`)
+  }
   assert.ok(app.windows.every((window) => window.app_identity === undefined),
     'list_apps windows must not repeat the full app identity payload')
+  assert.ok(app.windows.every((window) => window.minimized ||
+    (window.rect?.width >= 50 && window.rect?.height >= 32)),
+    'list_apps must use the same candidate-window size filter as list_windows')
 }
+
+const listedAppWindowCount = appsResult.apps.reduce((count, app) => count + app.windows.length, 0)
+assert.match(appsResult.message, new RegExp(`/ ${listedAppWindowCount} windows$`),
+  'list_apps message must report the number of windows actually returned')
+
+const allWindows = await tool.execute({ action: 'list_windows' })
+assert.equal(allWindows.ok, true, JSON.stringify(allWindows))
+assert.equal(allWindows.window_count, allWindows.windows.length)
+assert.ok(allWindows.windows.every((window) => window.app_identity === undefined),
+  'list_windows must not repeat app identity in every window')
 
 // A packaged app, when present on the host, must use AUMID as its stable key.
 const packaged = appsResult.apps.find((app) => app.identity?.kind === 'packaged')
@@ -48,7 +64,8 @@ const exactWindows = await tool.execute({
 assert.equal(exactWindows.ok, true, JSON.stringify(exactWindows))
 assert.ok(exactWindows.windows.length > 0)
 for (const window of exactWindows.windows) {
-  assert.equal(window.app_identity?.identity_key, candidate.identity.identity_key)
+  assert.equal(window.pid, candidate.pid)
+  assert.equal(window.app_identity, undefined)
 }
 
 // The same exact identity can target get_window without title/process ambiguity.

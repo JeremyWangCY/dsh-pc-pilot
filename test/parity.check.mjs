@@ -85,6 +85,10 @@ assert.ok(listWinRes, 'list_windows must return a result object')
 assert.equal(listWinRes.ok, true, `list_windows should succeed: ${JSON.stringify(listWinRes)}`)
 assert.equal(listWinRes.action, 'list_windows')
 assert.ok(Array.isArray(listWinRes.windows), 'windows must be an array')
+assert.equal(listWinRes.window_count, listWinRes.windows.length,
+  'window_count must match the returned windows array')
+assert.ok(listWinRes.windows.every((window) => window.app_identity === undefined),
+  'list_windows discovery entries must use the compact Window shape')
 
 // wait: fractional duration (default 1s when omitted, 0.3 here)
 const waitRes = await tool.execute({ action: 'wait', duration_s: 0.3 })

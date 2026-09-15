@@ -374,14 +374,13 @@ function Invoke-ActionRequest {
   try {
     switch ($Action) {
     'list_apps' {
-      $wins = @([DshWin32]::EnumWindowsList())
+      $wins = @(Get-CandidateWindows -App '')
       $byPid = @{}
       $procCache = @{}
       foreach ($w in $wins) {
-        if ($w.Rect.Left -lt -10000 -or $w.Rect.Top -lt -10000) { continue }
         if (-not $byPid.ContainsKey($w.Pid)) {
           $name = Get-ProcessNameFast -ProcessId $w.Pid -Cache $procCache
-          $identity = Get-ProcessIdentityFast -ProcessId $w.Pid
+          $identity = Get-ProcessDiscoveryIdentity -ProcessId $w.Pid
           $byPid[$w.Pid] = @{ pid = $w.Pid; name = $name; identity = $identity; windows = New-Object System.Collections.ArrayList }
         }
         $null = $byPid[$w.Pid].windows.Add((Get-WindowInfo $w -IncludeIdentity $false))
@@ -1575,7 +1574,7 @@ function Invoke-ActionRequest {
       $app = Get-PayloadValue 'app'
       $cand = Get-CandidateWindows -App ([string]$app)
       $infos = @()
-      foreach ($w in $cand) { $infos += (Get-WindowInfo $w) }
+      foreach ($w in $cand) { $infos += (Get-WindowInfo $w -IncludeIdentity $false) }
       $result.windows = $infos
       $result.window_count = $cand.Count
       if ($app) {
