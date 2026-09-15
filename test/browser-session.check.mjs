@@ -78,10 +78,14 @@ async function command(method, params = {}) {
     control.send(JSON.stringify({ id, method, params }))
   })
 }
-const pause = () => new Promise(resolve => setTimeout(resolve, 75))
+const pause = () => new Promise(resolve => setTimeout(resolve, 100))
+// The fixture page carries a 1200-node tail plus a shadow host, so the first
+// browser_state parse can take several seconds on a cold CI runner. Poll for up
+// to ~12s: every caller returns as soon as its condition holds, so a generous
+// ceiling costs nothing when the page is already warm.
 async function eventually(fn) {
   let last
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 120; i++) {
     try { return await fn() } catch (error) { last = error; await pause() }
   }
   throw last
