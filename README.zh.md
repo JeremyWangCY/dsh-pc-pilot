@@ -81,6 +81,31 @@ npm install ./dsh-pc-pilot
 
 或者手动 link 调试：把仓库放到 profile 的 `vendor/` 下，在 profile `package.json` 的依赖中写 `"dsh-pc-pilot": "link:./vendor/dsh-pc-pilot"`，`dsh.profile.bundles` 中加入 `"dsh-pc-pilot"`，`npm install` 后重启宿主。
 
+### CLI 与 Runtime API
+
+PC-Pilot 同时提供轻量独立 runtime。CLI 刻意保持“薄”：不维护 action 白名单、不替 Agent 编排固定工作流，也不会把不确定的写操作自动重试。
+
+```powershell
+npm install -g dsh-pc-pilot
+pc-pilot status
+pc-pilot doctor
+pc-pilot list_apps --json
+'{"action":"list_apps"}' | pc-pilot request --stdin --json
+```
+
+`act` / 直接 action 模式只是方便层；`request` 是给 Agent 的开放入口，会把完整 computer request（包括批量 `actions` 和未来新增字段）原样交给与 DSH `computer` 工具相同的 core。
+
+```js
+import { createPcPilotRuntime } from 'dsh-pc-pilot/runtime'
+
+const pc = createPcPilotRuntime()
+const apps = await pc.act('list_apps')
+const batch = await pc.run({ actions: [{ action: 'wait', seconds: 1 }] })
+pc.close()
+```
+
+Runtime 原样返回 core 的 outcome。尤其是 `outcome: "unknown"`，它代表 Agent 应先检查当前状态，而不是由 CLI 擅自重放动作。
+
 ### 状态条与光标指示器
 
 overlay 默认开启（`overlay: true`）。每个动作序列的第一次活动会让 helper 拉起两个常驻低频 PowerShell 循环（`virtual-cursor-overlay.ps1` 与 `pcpilot-statusbar.ps1`），它们轮询 `%TEMP%\dsh-cua` 下的状态文件：

@@ -68,6 +68,31 @@ npm install ./dsh-pc-pilot
 
 Or link it manually: add `"dsh-pc-pilot": "link:./vendor/dsh-pc-pilot"` to the profile's `package.json` dependencies, add the bundle to `dsh.profile.bundles`, run `npm install`, and restart the host.
 
+## CLI and runtime API
+
+PC-Pilot also exposes a small standalone runtime surface. The CLI is intentionally thin: it does not maintain an action whitelist, invent workflows, or retry uncertain mutations for the agent.
+
+```powershell
+npm install -g dsh-pc-pilot
+pc-pilot status
+pc-pilot doctor
+pc-pilot list_apps --json
+'{"action":"list_apps"}' | pc-pilot request --stdin --json
+```
+
+`act` / direct action mode is a convenience layer. `request` is the escape hatch for agents: it forwards a complete computer request, including batches and future fields, to the same core used by the DSH `computer` tool.
+
+```js
+import { createPcPilotRuntime } from 'dsh-pc-pilot/runtime'
+
+const pc = createPcPilotRuntime()
+const apps = await pc.act('list_apps')
+const batch = await pc.run({ actions: [{ action: 'wait', seconds: 1 }] })
+pc.close()
+```
+
+The runtime returns the core outcome unchanged. In particular, `outcome: "unknown"` is evidence for the agent to inspect state; the CLI does not turn it into an automatic replay.
+
 ## Status pill
 
 While the overlay is enabled (default), each first action launches two tiny resident PowerShell loops from the helper directory: the virtual-cursor indicator and the frosted status pill. They read a state file under `%TEMP%\dsh-cua` — the pill is visible top-center while activity is fresh (≤ 4 s) and fades out afterwards; both processes idle-exit after 120 s and respawn on demand. No driver, no UAC, no display changes — PC-Pilot runs entirely on the user's real desktop, in the background.
