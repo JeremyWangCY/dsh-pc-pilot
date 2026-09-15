@@ -31,7 +31,7 @@
 | 特性 | 说明 |
 | --- | --- |
 | 单工具全桌面加浏览器 | 桌面动作直接采用 Windows Computer Use 标准名称：`list_apps` / `list_windows` / `get_window` / `launch_app` / `get_window_state` / `click` / `press_key` / `type_text` / `scroll` / `drag` / `set_value` / `perform_secondary_action` / `activate_window` |
-| computer-use 闭环 | 支持最多 20 个有序 `actions`，首个失败/不确定/需要确认的步骤会停止；canonical 输入动作默认返回动作后的新状态与截图，浏览器变更返回 CDP PNG |
+| 轻量条件批处理 | 支持最多 20 个有序 `actions`；每一步可用 `when` 做执行前门控、用 `expect` 做执行后验证，首个条件不满足/失败/不确定步骤立即停止。`when` 默认只检查当前状态一次（`timeout_ms: 0`），不满足时绝不派发动作；不提供分支 DSL，也不会隐藏重试 |
 | 结构化安全分类 | 检测到明显的提交、发布、购买、删除、认证或敏感浏览器字段时标记 `safety.class=consequential`；当前 pc-pilot 不拦截执行，后续可由宿主接入确认策略 |
 | 后台优先输入 | 三级回退通道：UIA 动作模式 → 像素命中测试 → `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 消息；不把目标窗口带回前台，不占用真实键鼠 |
 | 观察快照绑定 | `get_window_state` 返回 `snapshot_id`；元素动作必须携带同一快照，快照过期、窗口移动、元素身份变化或动作消费后都会拒绝；未经验证的后台坐标点击不会回退到可能错误的控件 |
@@ -185,15 +185,18 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `browser_click_point` | 仅在绑定 `browser_state` / `browser_observe { with_screenshot: true }` 返回的精确 `screenshot_id` 时点击浏览器 viewport 坐标；tab/document/URL 变化或截图过期就拒绝 | `browser`、`screenshot_id`、`x`、`y` |
 | `browser_upload` | 把 1–20 个明确的绝对本地文件路径选择到已观察到的 `<input type=file>`，并验证浏览器确实收到；不会替 Agent 提交外围表单 | `browser`、`browser_element`、`files` |
 
-#### 动作后验证
+#### 动作前后条件
 
-可在单个动作中加入 `expect`，例如 `{ "type": "element_value", "element_id": "...", "value": "done" }` 或 `{ "type": "browser_text", "text": "完成" }`。支持的条件包括 `window_exists`、`window_closed`、`accessibility_changed`、`element_value`、`text_present`、`browser_url`、`browser_text`、`browser_ready` 与 `download_completed`。验证失败时动作结果为 `postcondition_failed`，不会自动重复可能已经发生的变更。
+`when` 与 `expect` 复用同一套轻量条件词汇：`window_exists`、`window_closed`、`accessibility_changed`、`element_value`、`text_present`、`browser_url`、`browser_text`、`browser_ready` 与 `download_completed`。
+
+- `when` 在动作派发前检查；默认 `timeout_ms: 0`，即只看当前状态一次。条件不满足时返回 `precondition_not_met + not_executed`，动作不会发生。
+- `expect` 在动作后验证，例如 `{ "type": "element_value", "element_id": "...", "value": "done" }` 或 `{ "type": "browser_text", "text": "完成" }`。验证失败返回 `postcondition_failed`，不会自动重复可能已经发生的变更。
 
 `recovery: "foreground_once"` 只处理一种确定情况：后台动作明确返回 `not_executed + background_unavailable`。如果是 element action，还必须同时传入观察时返回的 stable `element_id`，PC-Pilot 会先重新观察目标窗口、找回新的 `element_index + snapshot_id`，再做一次前台路径。任何 `unknown` 结果都不会自动重放。
 
 > `list_apps` 返回的应用与窗口目标可直接复用；发现目标后优先保留 `identity_key`，packaged app 使用 `aumid:<AUMID>`，Win32 使用 `win32:<完整 exe path>`，比进程名/标题更适合后续精确续接。`app` 仍可用 pid 数字、进程名或窗口标题子串。桌面元素动作必须携带同一次 `get_window_state { include_text: true }` 返回的 `snapshot_id`。
 
-批量调用示例：`computer { "actions": [{ "action": "click", "x": 420, "y": 260 }, { "action": "wait", "duration_s": 1 }] }`。每个步骤都返回在 `steps` 中；整批动作完成后只生成一次最终 `post_action_observation.screenshot`，避免用中间帧继续决策。
+批量调用适合**短、可预测**序列，例如：`computer { "actions": [{ "action": "browser_click", "browser_element": "@e3", "expect": { "type": "browser_text", "text": "已保存" } }, { "action": "browser_key", "key": "Escape", "when": { "type": "browser_text", "text": "已保存" } }] }`。前一步没有被验证，后一步就不会执行。它用于减少明显的模型往返，不是脚本分支系统；每个步骤仍返回在 `steps` 中，整批完成后只保留必要的最终观察。
 
 ### dispatch：后台与前台
 

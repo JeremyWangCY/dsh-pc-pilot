@@ -68,6 +68,40 @@ try {
     assert.equal(call.args.tab_id, 'tab-1')
   }
 
+  const conditionalCalls = []
+  const conditional = createPcPilotRuntime({
+    browserProvider: createBrowserProvider({
+      name: 'conditional-provider',
+      execute: async (action, args) => {
+        conditionalCalls.push({ action, args })
+        if (action === 'browser_state') return { ok: true, action, outcome: 'completed', url: 'https://example.test/ready' }
+        return { ok: true, action, outcome: 'completed', tabs: [] }
+      },
+    }),
+  })
+  try {
+    const target = { endpoint: 'ws://127.0.0.1:9222/devtools/browser/conditional', tab_id: 'tab-c' }
+    const allowed = await conditional.act('browser_tabs', {
+      browser: target,
+      when: { type: 'browser_url', url: 'https://example.test/', match: 'prefix' },
+    })
+    assert.equal(allowed.ok, true)
+    assert.equal(allowed.precondition.ok, true)
+    assert.deepEqual(conditionalCalls.map(call => call.action), ['browser_state', 'browser_tabs'])
+
+    conditionalCalls.length = 0
+    const blocked = await conditional.act('browser_tabs', {
+      browser: target,
+      when: { type: 'browser_url', url: 'https://different.test/' },
+    })
+    assert.equal(blocked.ok, false)
+    assert.equal(blocked.outcome, 'not_executed')
+    assert.equal(blocked.error_code, 'precondition_not_met')
+    assert.deepEqual(conditionalCalls.map(call => call.action), ['browser_state'], 'unmet browser precondition must prevent action dispatch')
+  } finally {
+    conditional.close()
+  }
+
   const uncertainCalls = []
   const uncertain = createPcPilotRuntime({
     browserProvider: createBrowserProvider({

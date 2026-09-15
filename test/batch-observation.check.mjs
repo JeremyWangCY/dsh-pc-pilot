@@ -38,6 +38,37 @@ try {
   assert.equal(invalid.failed_index, 1)
   assert.equal(invalid.completed_count, 1)
 
+  // Lightweight conditional batching: `when` gates a step before dispatch; `expect`
+  // remains the post-action gate. No branching or hidden retry engine is involved.
+  const definitelyMissingHwnd = 999999999
+  const gatedPass = await tool.execute({
+    hwnd: definitelyMissingHwnd,
+    actions: [
+      { action: 'wait', duration_s: 0, when: { type: 'window_closed' } },
+      { action: 'wait', duration_s: 0 },
+    ],
+  })
+  rememberCapture(gatedPass)
+  assert.equal(gatedPass.ok, true, JSON.stringify(gatedPass))
+  assert.equal(gatedPass.completed_count, 2)
+  assert.equal(gatedPass.steps[0].precondition.ok, true)
+  assert.equal(gatedPass.steps[0].precondition.waited_ms >= 0, true)
+
+  const gatedStop = await tool.execute({
+    hwnd: definitelyMissingHwnd,
+    actions: [
+      { action: 'wait', duration_s: 0, when: { type: 'window_exists' } },
+      { action: 'wait', duration_s: 0 },
+    ],
+  })
+  assert.equal(gatedStop.ok, false)
+  assert.equal(gatedStop.outcome, 'not_executed')
+  assert.equal(gatedStop.failed_index, 0)
+  assert.equal(gatedStop.completed_count, 0)
+  assert.equal(gatedStop.steps.length, 1, 'later batch steps must not run after an unmet precondition')
+  assert.equal(gatedStop.steps[0].error_code, 'precondition_not_met')
+  assert.equal(gatedStop.steps[0].retry_safe, true)
+
   console.log('batch observation and safety check PASSED')
 } finally {
   for (const capturePath of captures) {

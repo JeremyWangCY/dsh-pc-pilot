@@ -43,6 +43,8 @@ const tool = defineComputerTool((value) => value, {})
 const p = tool.parameters.properties
 assert.equal(p.expect.type, 'object')
 assert.ok(p.expect.properties.type.enum.includes('element_value'))
+assert.equal(p.when.type, 'object')
+assert.deepEqual(p.when.properties.type.enum, p.expect.properties.type.enum, 'when reuses the same lightweight condition vocabulary as expect')
 assert.deepEqual(p.recovery.enum, ['none', 'foreground_once'])
 assert.equal(p.element_id.type, 'string')
 
@@ -50,5 +52,10 @@ const invalid = await tool.execute({ action: 'wait', duration_s: 0, expect: { ty
 assert.equal(invalid.ok, false)
 assert.equal(invalid.error_code, 'invalid_postcondition')
 assert.equal(invalid.outcome, 'not_executed')
+
+const invalidWhen = await tool.execute({ action: 'wait', duration_s: 0, when: { type: 'element_value', value: 'x' } })
+assert.equal(invalidWhen.ok, false)
+assert.equal(invalidWhen.error_code, 'invalid_precondition')
+assert.equal(invalidWhen.outcome, 'not_executed')
 
 console.log('postcondition check PASSED')
