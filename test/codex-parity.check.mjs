@@ -187,6 +187,8 @@ try {
   assert.equal(minimized.minimized, true, `validated background click must actually minimize the fixture: ${JSON.stringify(clickElRes)}`)
   const afterMinimize = await tool.execute({ action: 'get_window_state', hwnd: fixtureHwnd, screenshot: false })
   assert.equal(afterMinimize.error_code, 'background_unavailable', 'background observation must not restore the minimized window')
+  assert.equal(afterMinimize.message,
+    'background_unavailable: target window is minimized; background inspection cannot observe minimized windows. Use activate_window to restore it to the foreground first, or use foreground dispatch if permitted.')
 
   // 3d. activate_window on owned fixture
   const actRes = await tool.execute({ action: 'activate_window', hwnd: fixtureHwnd })

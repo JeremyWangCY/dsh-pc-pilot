@@ -16,6 +16,8 @@ assert.equal(parameters.keys.type, 'array')
 assert.equal(parameters.path.type, 'array', 'drag path must use a Gemini-compatible array schema')
 assert.equal(parameters.path.items.type, 'object', 'drag path points must have one unambiguous type')
 assert.equal(parameters.screenshot_path.type, 'string', 'zoom must expose a separate screenshot path')
+assert.equal(parameters.start.description,
+  'Character offset for select_text (start of range, or caret when length is 0), or zero-based start character for browser_replace range replacement.')
 assert.equal(parameters.actions.type, 'array')
 assert.equal(parameters.action.required, undefined, 'action is optional when an ordered actions array is supplied')
 assert.ok(parameters.url, 'computer schema must expose initial browser URL')

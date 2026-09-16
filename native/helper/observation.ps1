@@ -333,7 +333,7 @@ function Resolve-TargetWindow {
   if ($null -ne $target -and [DshWin32]::IsIconic($target.Hwnd)) {
     $currAct = Get-PayloadValue 'action'
     if ($currAct -notin @('get_window', 'list_windows', 'activate_window', 'close_window')) {
-      if ((Get-Dispatch) -ne 'foreground') { throw 'background_unavailable: target minimized; background inspection never restores a window onto the user desktop' }
+      if ((Get-Dispatch) -ne 'foreground') { throw 'background_unavailable: target window is minimized; background inspection cannot observe minimized windows. Use activate_window to restore it to the foreground first, or use foreground dispatch if permitted.' }
       [DshWin32]::ShowWindow($target.Hwnd, 4) | Out-Null
       [DshWin32]::SetWindowPos($target.Hwnd, [DshWin32]::HWND_BOTTOM, 0, 0, 0, 0, 0x0053) | Out-Null
       $target.Rect = [DshWin32]::GetDwmRect($target.Hwnd)

@@ -19,6 +19,16 @@ const provider = createBrowserProvider({
 
 const runtime = createPcPilotRuntime({ browserProvider: provider })
 try {
+  const defaultRuntime = createPcPilotRuntime()
+  try {
+    const missingEndpoint = await defaultRuntime.act('browser_open', { url: 'https://example.test/' })
+    assert.equal(missingEndpoint.error_code, 'browser_action_rejected')
+    assert.equal(missingEndpoint.message,
+      'browser_endpoint required (use launch_app with name: "msedge" and headless: true to start an isolated browser session first, or pass the returned browser: { endpoint, tab_id })')
+  } finally {
+    defaultRuntime.close()
+  }
+
   assert.equal(runtime.status().providers.browser, 'test-browser-provider')
   assert.throws(() => runtime.bind(null), /bound defaults must be an object/)
   assert.throws(() => runtime.bind([]), /bound defaults must be an object/)
