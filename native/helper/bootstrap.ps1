@@ -6,7 +6,7 @@
 #   dispatch=foreground = real SendInput).
 # Actions: list_apps, list_windows, get_window, launch_app, get_window_state,
 #   click, press_key, type_text, scroll, drag, set_value,
-#   perform_secondary_action, activate_window, select_text, screenshot,
+#   perform_secondary_action, activate_window, minimize_window, select_text, screenshot,
 #   zoom, switch_display, cursor_position, list_windows, wait. Usage: powershell -NoProfile -ExecutionPolicy Bypass
 #   -File <this> -Action <action> -PayloadStdin (or -PayloadJson "<json>"); writes ONE JSON doc to stdout.
 param(

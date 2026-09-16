@@ -227,7 +227,16 @@ function Do-AppState {
   $script:cachedElements = $null
   $script:cachedIdentities = $null
   if ($WithText) {
-    $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+    $isCommonDialog = $false
+    try {
+      $dialogRoot = [System.Windows.Automation.AutomationElement]::FromHandle($win.Hwnd)
+      $isCommonDialog = ([string]$dialogRoot.Current.ClassName -eq '#32770')
+    } catch { }
+    if (-not $isCommonDialog) {
+      $isCommonDialog = ([string]$win.Title -match '(?i)^(save as|save|open|另存为|保存|打开)(\s.*)?$')
+    }
+    $treeDepth = if ($isCommonDialog) { 3 } else { 0 }
+    $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect -MaxDepth $treeDepth
     $bestCachedElements = $script:cachedElements
     $bestCachedIdentities = $script:cachedIdentities
     # DESK-03: a freshly launched Win11 Notepad (and several WinUI apps) can
@@ -254,7 +263,7 @@ function Do-AppState {
       $retryLimit = if ($tree.Count -eq 0) { 2 } else { 8 }
       for ($attempt = 0; $attempt -lt $retryLimit -and $needsStabilization; $attempt++) {
         Start-Sleep -Milliseconds 250
-        $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+        $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect -MaxDepth $treeDepth
         if ($retryTree.Count -gt $tree.Count) {
           $tree = $retryTree
           $bestCachedElements = $script:cachedElements
@@ -286,9 +295,11 @@ function Do-AppState {
     $deltaKey = ('{0}:{1}' -f [string]$win.Hwnd.ToInt64(), [string]$win.Pid)
     $accessibilityDelta = Get-AccessibilityDelta -Key $deltaKey -Tree $tree
     $accessibilityRevision = $accessibilityDelta.revision
-    $docText = Get-DocumentText $win.Hwnd
+    $docText = if ($isCommonDialog) {
+      [string](($tree | ForEach-Object { @($_.name, $_.value) } | Where-Object { $_ }) -join "`n")
+    } else { Get-DocumentText $win.Hwnd }
     $focusedElement = Get-FocusedElementText $win.Hwnd
-    $selectedText = Get-SelectedText $win.Hwnd
+    $selectedText = if ($isCommonDialog) { '' } else { Get-SelectedText $win.Hwnd }
     $selectedElements = @($tree | Where-Object { $_.selected } | ForEach-Object { "[$($_.index)] $($_.role): $($_.name)" })
   }
   $script:observation = @{ id = [guid]::NewGuid().ToString('N'); hwnd = $win.Hwnd; rect = $win.Rect; created = [DateTime]::UtcNow }

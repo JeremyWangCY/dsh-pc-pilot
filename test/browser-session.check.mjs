@@ -158,6 +158,21 @@ try {
   assert.equal(pointClick.ok, true)
   assert.equal(pointClick.outcome, 'dispatched')
   assertOptionalPostActionScreenshot(pointClick, 'browser point click')
+  let postActionScreenshot = pointClick.screenshot
+  for (let attempt = 0; !postActionScreenshot && attempt < 3; attempt++) {
+    const recaptured = await browserAction('browser_click_point', {
+      ...args, screenshot_id: observedScreenshotId, x: 1, y: 1,
+    })
+    postActionScreenshot = recaptured.screenshot
+  }
+  assert.ok(postActionScreenshot, 'browser point click returns a post-action screenshot for chaining')
+  const chainedPointClick = await browserAction('browser_click_point', {
+    ...args,
+    screenshot_id: postActionScreenshot.screenshot_id,
+    x: 1,
+    y: 1,
+  })
+  assert.equal(chainedPointClick.ok, true, 'post-action screenshot token supports a chained point click')
   await eventually(async () => { const value = await state(); get(value, 'Latest clicked'); return true })
   const uploadRef = getRef(semanticObservation, 'Upload fixture')
   await assert.rejects(browserAction('browser_upload', { ...args, element: uploadRef, files: ['relative.txt'] }), /absolute file paths/)

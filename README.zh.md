@@ -31,7 +31,7 @@
 
 | 特性 | 说明 |
 | --- | --- |
-| 单工具全桌面加浏览器 | 桌面动作直接采用 Windows Computer Use 标准名称：`list_apps` / `list_windows` / `get_window` / `launch_app` / `get_window_state` / `click` / `press_key` / `type_text` / `scroll` / `drag` / `set_value` / `perform_secondary_action` / `activate_window` |
+| 单工具全桌面加浏览器 | 桌面动作直接采用 Windows Computer Use 标准名称：`list_apps` / `list_windows` / `get_window` / `launch_app` / `get_window_state` / `click` / `press_key` / `type_text` / `scroll` / `drag` / `set_value` / `perform_secondary_action` / `activate_window` / `minimize_window` |
 | 轻量条件批处理 | 支持最多 20 个有序 `actions`；每一步可用 `when` 做执行前门控、用 `expect` 做执行后验证，首个条件不满足/失败/不确定步骤立即停止。`when` 默认只检查当前状态一次（`timeout_ms: 0`），不满足时绝不派发动作；不提供分支 DSL，也不会隐藏重试 |
 | 结构化安全分类 | 检测到明显的提交、发布、购买、删除、认证或敏感浏览器字段时标记 `safety.class=consequential`；当前 pc-pilot 不拦截执行，后续可由宿主接入确认策略 |
 | 后台优先输入与能力路由 | 观察阶段按窗口/控件缓存 UIA `Invoke` / `Value` / `Toggle` / `Selection` / `ExpandCollapse` / `Scroll` / `RangeValue` 能力；已知不支持的路径不会每步重复试错。传统控件使用经过验证的目标窗口 `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` 路径，且不会因为窗口被遮挡就命中前台遮挡物 |
@@ -177,13 +177,13 @@ computer { "action": "type_text", "window": { "id": 12345, "app": "notepad" }, "
 | `screenshot` / `zoom` | 整屏或区域截图 / 裁剪先前截图；执行层仍兼容旧 `path` 输入 | `display`?、`x`、`y`、`width`、`height`、`screenshot_path`? |
 | `switch_display` / `cursor_position` | 设置默认截图显示器 / 读取真实光标位置 | `display` / 无 |
 | `launch_app` / `wait` | 默认在不激活、不抢焦点的前提下把新窗口放到当前工作窗口后层，并保持正常可渲染状态，便于 WGC/UIA 持续后台操作；只有用户明确要求带到前台时才传 `activate: true`。支持 `ms-settings:display` 等已注册 Windows 激活协议。经代理启动时仅在能安全识别唯一新窗口后返回可直接复用的 `window`；带窗口时可用 `wait_for: "accessibility_present"` 等待任意 UIA 元素，或用 `accessibility_available` 等待完整树，超时返回可重试的明确状态 / 动作间等待 | `app` / `activate`? / `duration_s` / `wait_for` |
-| `activate_window` / `close_window` / `get_window` | 显式前台激活窗口 / 优雅关闭窗口 (WM_CLOSE) 并核验窗口确实消失，否则返回 `window_close_unconfirmed` / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
+| `activate_window` / `minimize_window` / `close_window` / `get_window` | 显式前台激活窗口 / 直接通过 Win32 最小化（无需点击标题栏坐标）/ 优雅关闭窗口 (WM_CLOSE) 并核验窗口确实消失，否则返回 `window_close_unconfirmed` / 实时获取窗口最新几何与状态元数据 | `app`?、`hwnd`?、`window_index`? |
 | `read_clipboard` / `write_clipboard` | 剪贴板读写 | 无 / `text` |
 | `browser_tabs` / `browser_state` / `browser_observe` / `browser_history` / `browser_back` / `browser_forward` / `browser_wait` | 精确管理标签页；`browser_observe` 返回只含短 ref 的紧凑语义状态，`browser_state` 为兼容性保留原始 token；支持历史前进后退并等待 ready/URL 变化/指定文本 | `browser_endpoint`、`tab_id`?、`include_url`?、`browser_wait_for`? |
 | `browser_events` / `browser_downloads` | 按 `event_cursor` 增量读取 console/network/lifecycle 证据；跟踪 Chromium 下载进度和已落盘文件 | `browser_endpoint`、`tab_id`?、`event_cursor`? |
 | `browser_shutdown` | 仅关闭同一 PC-Pilot 实例启动的整浏览器 | `browser_endpoint` |
 | `browser_click` / `browser_type` / `browser_replace` / `browser_key` | 操作最新 state/observe 返回的原始 token 或紧凑 `@eN` ref；目标过期或身份变化时拒绝 | 优先复用 `browser: { endpoint, tab_id }`，或兼容使用 `browser_endpoint`、`tab_id`；`browser_element` |
-| `browser_click_point` | 仅在绑定 `browser_state` / `browser_observe { with_screenshot: true }` 返回的精确 `screenshot_id` 时点击浏览器 viewport 坐标；tab/document/URL 变化或截图过期就拒绝 | `browser`、`screenshot_id`、`x`、`y` |
+| `browser_click_point` | 仅使用精确绑定的 `screenshot_id` 点击浏览器 viewport 坐标；显式观察和操作后截图在 tab/document/URL 未变化时均可连续使用 30 秒 | `browser`、`screenshot_id`、`x`、`y` |
 | `browser_upload` | 把 1–20 个明确的绝对本地文件路径选择到已观察到的 `<input type=file>`，并验证浏览器确实收到；不会替 Agent 提交外围表单 | `browser`、`browser_element`、`files` |
 
 #### 动作前后条件

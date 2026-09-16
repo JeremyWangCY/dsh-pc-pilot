@@ -15,7 +15,7 @@ const params = tool.parameters.properties
 const expectedActions = [
   // Windows Computer Use desktop actions
   'list_apps', 'list_windows', 'get_window', 'launch_app', 'get_window_state',
-  'click', 'press_key', 'type_text', 'scroll', 'drag', 'set_value', 'perform_secondary_action', 'activate_window',
+  'click', 'press_key', 'type_text', 'scroll', 'drag', 'set_value', 'perform_secondary_action', 'activate_window', 'minimize_window',
   // PC-Pilot extensions
   'read_clipboard', 'write_clipboard', 'mouse_down', 'mouse_up', 'hold_key', 'list_displays',
   'select_text', 'screenshot', 'zoom', 'switch_display', 'cursor_position', 'wait', 'close_window',

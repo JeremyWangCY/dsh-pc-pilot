@@ -17,7 +17,7 @@ const tool = defineComputerTool((def) => def)
 const params = tool.parameters.properties
 
 // All 3 new window-management actions must be registered in action enum
-const newActions = ['activate_window', 'close_window', 'get_window']
+const newActions = ['activate_window', 'minimize_window', 'close_window', 'get_window']
 for (const act of newActions) {
   assert.ok(
     params.action.enum.includes(act),
@@ -138,16 +138,21 @@ try {
   // 3c. Background key chords with Sky/Mac syntax (never touches foreground)
   const chordKeyRes = await tool.execute({
     action: 'press_key',
-    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
+    hwnd: fixtureHwnd,
     key: 'Control_L+a',
     dispatch: 'background',
     overlay: false,
   })
   assert.equal(chordKeyRes.ok, true, `background chord key Control_L+a must succeed: ${JSON.stringify(chordKeyRes)}`)
 
+  const hwndTypeRes = await tool.execute({
+    action: 'type_text', hwnd: fixtureHwnd, text: 'hwnd-only', dispatch: 'foreground', overlay: false,
+  })
+  assert.equal(hwndTypeRes.ok, true, `type_text with hwnd only must succeed: ${JSON.stringify(hwndTypeRes)}`)
+
   const chordHoldRes = await tool.execute({
     action: 'hold_key',
-    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
+    hwnd: fixtureHwnd,
     key: 'ctrl+shift+p',
     duration_ms: 100,
     dispatch: 'background',
@@ -156,13 +161,13 @@ try {
   assert.equal(chordHoldRes.ok, true, `background hold_key ctrl+shift+p must succeed: ${JSON.stringify(chordHoldRes)}`)
 
   // 3c-2. Click with element parameter (resolves element coordinates, not top-left)
-  const clickState = await tool.execute({ action: 'get_window_state', app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}), screenshot: false, include_text: true })
+  const clickState = await tool.execute({ action: 'get_window_state', hwnd: fixtureHwnd, screenshot: false, include_text: true })
   assert.equal(clickState.ok, true, `fresh state before element click must succeed: ${JSON.stringify(clickState)}`)
   const clickElement = clickState.elements.find(element => element.enabled && !element.offscreen && /^(最小化|Minimize)$/.test(element.name))
   assert.ok(clickElement, `fresh state must expose minimize: ${JSON.stringify(clickState.elements.map(e => ({ name:e.name, role:e.role, invokable:e.invokable, enabled:e.enabled, offscreen:e.offscreen })))}`)
   const clickElRes = await tool.execute({
     action: 'click',
-    app: String(fixturePid), ...(fixtureHwnd ? { hwnd: fixtureHwnd } : {}),
+    hwnd: fixtureHwnd,
     element: clickElement.index,
     snapshot_id: clickState.snapshot_id,
     expected_name: clickElement.name,
@@ -196,7 +201,17 @@ try {
   assert.equal(actRes.hwnd, fixtureHwnd, 'activate_window hwnd must match')
   assert.equal(actRes.activated, true, 'activate_window activated must be true')
 
-  // 3e. close_window on owned fixture
+  // 3e. minimize_window uses Win32 state, never title-bar coordinates.
+  const minimizeRes = await tool.execute({ action: 'minimize_window', hwnd: fixtureHwnd })
+  assert.equal(minimizeRes.ok, true, `minimize_window should succeed: ${JSON.stringify(minimizeRes)}`)
+  assert.equal(minimizeRes.hwnd, fixtureHwnd, 'minimize_window hwnd must match')
+  assert.equal(minimizeRes.minimized, true, 'minimize_window minimized must be true')
+  const minimizedState = await tool.execute({ action: 'get_window', hwnd: fixtureHwnd })
+  assert.equal(minimizedState.minimized, true, 'get_window must confirm the owned fixture is minimized')
+  const restoredAgain = await tool.execute({ action: 'activate_window', hwnd: fixtureHwnd })
+  assert.equal(restoredAgain.ok, true, `activate_window must restore after minimize_window: ${JSON.stringify(restoredAgain)}`)
+
+  // 3f. close_window on owned fixture
   const closeRes = await tool.execute({ action: 'close_window', hwnd: fixtureHwnd })
   assert.equal(closeRes.ok, true, `close_window should succeed: ${JSON.stringify(closeRes)}`)
   assert.equal(closeRes.hwnd, fixtureHwnd, 'close_window hwnd must match')

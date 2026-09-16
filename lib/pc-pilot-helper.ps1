@@ -6,7 +6,7 @@
 #   dispatch=foreground = real SendInput).
 # Actions: list_apps, list_windows, get_window, launch_app, get_window_state,
 #   click, press_key, type_text, scroll, drag, set_value,
-#   perform_secondary_action, activate_window, select_text, screenshot,
+#   perform_secondary_action, activate_window, minimize_window, select_text, screenshot,
 #   zoom, switch_display, cursor_position, list_windows, wait. Usage: powershell -NoProfile -ExecutionPolicy Bypass
 #   -File <this> -Action <action> -PayloadStdin (or -PayloadJson "<json>"); writes ONE JSON doc to stdout.
 param(
@@ -1163,7 +1163,7 @@ function Resolve-TargetWindow {
   # silently unminimize with SW_SHOWNOACTIVATE so rect and UIA are valid without stealing focus
   if ($null -ne $target -and [DshWin32]::IsIconic($target.Hwnd)) {
     $currAct = Get-PayloadValue 'action'
-    if ($currAct -notin @('get_window', 'list_windows', 'activate_window', 'close_window')) {
+    if ($currAct -notin @('get_window', 'list_windows', 'activate_window', 'minimize_window', 'close_window')) {
       if ((Get-Dispatch) -ne 'foreground') { throw 'background_unavailable: target window is minimized; background inspection cannot observe minimized windows. Use activate_window to restore it to the foreground first, or use foreground dispatch if permitted.' }
       [DshWin32]::ShowWindow($target.Hwnd, 4) | Out-Null
       [DshWin32]::SetWindowPos($target.Hwnd, [DshWin32]::HWND_BOTTOM, 0, 0, 0, 0, 0x0053) | Out-Null
@@ -1369,7 +1369,7 @@ function Get-AccessibilityDelta {
 }
 
 function Get-AccessibilityTree {
-  param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS, $WinRect = $null)
+  param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS, $WinRect = $null, [int]$MaxDepth = 0)
   $script:cachedTreeHwnd = $Hwnd
   $script:cachedElements = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
   $script:cachedIdentities = New-Object System.Collections.Generic.List[string]
@@ -1378,7 +1378,27 @@ function Get-AccessibilityTree {
     try { $WinRect = [DshWin32]::GetRect($Hwnd) } catch { }
   }
   $aeRoot = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
-  $children = $aeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  if ($MaxDepth -gt 0) {
+    # Explorer-backed common dialogs can expose the entire Shell namespace as
+    # descendants. Walk only a few ControlView levels so filename, location,
+    # and action controls stay available without enumerating the filesystem.
+    $children = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    $queue.Enqueue([PSCustomObject]@{ element = $aeRoot; depth = 0 })
+    while ($queue.Count -gt 0 -and $children.Count -lt $MaxElements) {
+      $entry = $queue.Dequeue()
+      if ([int]$entry.depth -ge $MaxDepth) { continue }
+      $child = $walker.GetFirstChild($entry.element)
+      while ($null -ne $child -and $children.Count -lt $MaxElements) {
+        $children.Add($child)
+        $queue.Enqueue([PSCustomObject]@{ element = $child; depth = ([int]$entry.depth + 1) })
+        $child = $walker.GetNextSibling($child)
+      }
+    }
+  } else {
+    $children = $aeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  }
   $out = New-Object System.Collections.Generic.List[object]
   $count = 0
   foreach ($el in $children) {
@@ -2469,7 +2489,16 @@ function Do-AppState {
   $script:cachedElements = $null
   $script:cachedIdentities = $null
   if ($WithText) {
-    $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+    $isCommonDialog = $false
+    try {
+      $dialogRoot = [System.Windows.Automation.AutomationElement]::FromHandle($win.Hwnd)
+      $isCommonDialog = ([string]$dialogRoot.Current.ClassName -eq '#32770')
+    } catch { }
+    if (-not $isCommonDialog) {
+      $isCommonDialog = ([string]$win.Title -match '(?i)^(save as|save|open|另存为|保存|打开)(\s.*)?$')
+    }
+    $treeDepth = if ($isCommonDialog) { 3 } else { 0 }
+    $tree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect -MaxDepth $treeDepth
     $bestCachedElements = $script:cachedElements
     $bestCachedIdentities = $script:cachedIdentities
     # DESK-03: a freshly launched Win11 Notepad (and several WinUI apps) can
@@ -2496,7 +2525,7 @@ function Do-AppState {
       $retryLimit = if ($tree.Count -eq 0) { 2 } else { 8 }
       for ($attempt = 0; $attempt -lt $retryLimit -and $needsStabilization; $attempt++) {
         Start-Sleep -Milliseconds 250
-        $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect
+        $retryTree = Get-AccessibilityTree $win.Hwnd -WinRect $win.Rect -MaxDepth $treeDepth
         if ($retryTree.Count -gt $tree.Count) {
           $tree = $retryTree
           $bestCachedElements = $script:cachedElements
@@ -2528,9 +2557,11 @@ function Do-AppState {
     $deltaKey = ('{0}:{1}' -f [string]$win.Hwnd.ToInt64(), [string]$win.Pid)
     $accessibilityDelta = Get-AccessibilityDelta -Key $deltaKey -Tree $tree
     $accessibilityRevision = $accessibilityDelta.revision
-    $docText = Get-DocumentText $win.Hwnd
+    $docText = if ($isCommonDialog) {
+      [string](($tree | ForEach-Object { @($_.name, $_.value) } | Where-Object { $_ }) -join "`n")
+    } else { Get-DocumentText $win.Hwnd }
     $focusedElement = Get-FocusedElementText $win.Hwnd
-    $selectedText = Get-SelectedText $win.Hwnd
+    $selectedText = if ($isCommonDialog) { '' } else { Get-SelectedText $win.Hwnd }
     $selectedElements = @($tree | Where-Object { $_.selected } | ForEach-Object { "[$($_.index)] $($_.role): $($_.name)" })
   }
   $script:observation = @{ id = [guid]::NewGuid().ToString('N'); hwnd = $win.Hwnd; rect = $win.Rect; created = [DateTime]::UtcNow }
@@ -2830,7 +2861,7 @@ function Invoke-MouseButtonAction {
   $rawY = Get-PayloadValue 'y'
   $dispatch = Get-Dispatch
   $win = $null
-  if ($app) {
+  if ($app -or (Get-PayloadValue 'hwnd')) {
     $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
     if ($dispatch -eq 'foreground') {
       $Result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -3037,7 +3068,7 @@ function Invoke-ActionRequest {
       $dispatch = Get-Dispatch
       $rawMods = [string](Get-PayloadValue 'modifiers')
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
@@ -3204,10 +3235,10 @@ function Invoke-ActionRequest {
       $app = Get-PayloadValue 'app'
       $text = Get-PayloadValue 'text'
       $dispatch = Get-Dispatch
-      if ($dispatch -eq 'background' -and -not $app) {
-        throw 'target_required: background type requires app; global SendInput requires dispatch=foreground'
+      if ($dispatch -eq 'background' -and -not $app -and -not (Get-PayloadValue 'hwnd')) {
+        throw 'target_required: background type requires app or hwnd; global SendInput requires dispatch=foreground'
       }
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
           $result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -3278,11 +3309,11 @@ function Invoke-ActionRequest {
       $key = $chord.Key
       $mods = $chord.Modifiers
       $dispatch = Get-Dispatch
-      if ($dispatch -eq 'background' -and -not $app) {
-        throw 'target_required: background key requires app; global SendInput requires dispatch=foreground'
+      if ($dispatch -eq 'background' -and -not $app -and -not (Get-PayloadValue 'hwnd')) {
+        throw 'target_required: background key requires app or hwnd; global SendInput requires dispatch=foreground'
       }
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
           $result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -3325,7 +3356,7 @@ function Invoke-ActionRequest {
       $dispatch = Get-Dispatch
       if ($dispatch -eq 'background' -and $rawMods) { throw 'background_unavailable: modifier scroll needs dispatch=foreground because UIA scroll patterns do not carry keyboard state' }
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
@@ -3523,7 +3554,7 @@ function Invoke-ActionRequest {
         if ($pathXs.Count -lt 2) { throw 'invalid drag path: at least two points required' }
       }
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
@@ -3642,7 +3673,7 @@ function Invoke-ActionRequest {
       if ($dur -gt 10000) { $dur = 10000 }
       $dispatch = Get-Dispatch
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
           $result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -4025,7 +4056,7 @@ function Invoke-ActionRequest {
       $rawMods = [string](Get-PayloadValue 'modifiers')
       $dispatch = Get-Dispatch
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         $r = $win.Rect
         if ($x -ge $r.Left -and $x -le $r.Right -and $y -ge $r.Top -and $y -le $r.Bottom) {
@@ -4067,6 +4098,25 @@ function Invoke-ActionRequest {
       $result.title = $win.Title
       $result.activated = [bool]$activated
       $result.message = "Activated window '$($win.Title)' (hwnd=$($win.Hwnd.ToInt64()), activated=$activated)"
+    }
+
+    'minimize_window' {
+      $app = Get-PayloadValue 'app'
+      $idx = [int](Get-PayloadValue 'window_index')
+      $hwndVal = Get-PayloadValue 'hwnd'
+      $hwnd = if ($hwndVal) { [int64]$hwndVal } else { 0 }
+      $win = Resolve-TargetWindow -App $app -Index $idx -Hwnd $hwnd
+      $targetHwnd = $win.Hwnd
+      $null = [DshWin32]::ShowWindow($targetHwnd, 6)
+      for ($i = 0; $i -lt 10 -and -not [DshWin32]::IsIconic($targetHwnd); $i++) {
+        Start-Sleep -Milliseconds 50
+      }
+      $minimized = [DshWin32]::IsIconic($targetHwnd)
+      $result.hwnd = $targetHwnd.ToInt64()
+      $result.title = $win.Title
+      $result.minimized = [bool]$minimized
+      if (-not $minimized) { throw 'window_minimize_unconfirmed: ShowWindow(SW_MINIMIZE) returned but the target is not minimized' }
+      $result.message = "Minimized window '$($win.Title)' (hwnd=$($targetHwnd.ToInt64()))"
     }
 
     'close_window' {
@@ -4506,7 +4556,7 @@ finally {
   # If the target app (e.g. Edge/Chromium UIA Invoke, WM messages) activates itself,
   # immediately demote the target window to bottom and restore the user's active window!
   $foregroundLaunchRequested = ($Action -eq 'launch_app' -and [bool](Get-PayloadValue 'activate'))
-  if ($dispatchMode -eq 'background' -and -not $foregroundLaunchRequested -and $Action -notin @('activate_window') -and $prevUserFg -ne [IntPtr]::Zero) {
+  if ($dispatchMode -eq 'background' -and -not $foregroundLaunchRequested -and $Action -notin @('activate_window', 'minimize_window') -and $prevUserFg -ne [IntPtr]::Zero) {
     $curFg = [DshWin32]::GetForegroundWindow()
     if ($curFg -ne [IntPtr]::Zero -and $curFg -ne $prevUserFg) {
       [DshWin32]::PushWindowToBottom($curFg) | Out-Null

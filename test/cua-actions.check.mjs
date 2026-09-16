@@ -4,10 +4,10 @@ import { defineComputerTool, normalizeComputerAction } from '../lib/index.js'
 const tool = defineComputerTool((value) => value, {})
 const parameters = tool.parameters.properties
 const actionEnum = parameters.action.enum
-assert.deepEqual(actionEnum.slice(0, 13), [
+assert.deepEqual(actionEnum.slice(0, 14), [
   'list_apps', 'list_windows', 'get_window', 'launch_app', 'get_window_state',
   'click', 'press_key', 'type_text', 'scroll', 'set_value', 'drag',
-  'perform_secondary_action', 'activate_window',
+  'perform_secondary_action', 'activate_window', 'minimize_window',
 ])
 for (const removed of ['get_app_state', 'open_app', 'click_element', 'key', 'perform_action']) {
   assert.ok(!actionEnum.includes(removed), `legacy action must not be model-callable: ${removed}`)

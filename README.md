@@ -20,7 +20,7 @@ Optimization priority: **browser batched/local observation → UIA caching and c
 
 ## Features
 
-- **One tool, full desktop plus browser** — the desktop surface uses canonical Windows Computer Use names directly: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `drag`, `set_value`, `perform_secondary_action`, and `activate_window`.
+- **One tool, full desktop plus browser** — the desktop surface uses canonical Windows Computer Use names directly: `list_apps`, `list_windows`, `get_window`, `launch_app`, `get_window_state`, `click`, `press_key`, `type_text`, `scroll`, `drag`, `set_value`, `perform_secondary_action`, `activate_window`, and `minimize_window`.
 - **Reusable Windows targets** — observations return `window: { id, app }`, which can be supplied unchanged to the next action. Element actions use `element_index`; screenshot coordinates use `scrollX` / `scrollY` and `mouse_button` where applicable.
 - **Background-first input with capability routing** — observations cache per-window/per-control support for UIA patterns (Invoke / Value / Toggle / Selection / ExpandCollapse / Scroll / RangeValue). Known-unsupported paths are skipped instead of reprobed on every action; verified target-window `WM_CHAR` / `WM_KEY` / `WM_MOUSEWHEEL` messages cover traditional controls without consulting an occluding foreground window. A fresh UIA observation rebuilds the capability map when the window/control tree changes.
 - **State-bound actions** — `get_window_state` returns a `snapshot_id` and `screenshot_id`; element actions must present that snapshot and coordinate actions can bind to the screenshot. Expired, moved, wrong-window, changed-element, or consumed state is rejected instead of falling back to a potentially wrong control.
@@ -139,13 +139,13 @@ The plugin registers one global tool, `computer`. Typical flow:
 | `screenshot` / `zoom` | Full-display or region capture; crop `screenshot_path` from a prior capture (`path` remains accepted by the runtime for compatibility) |
 | `switch_display` / `cursor_position` | Default capture display; real cursor location |
 | `launch_app` / `wait` | Launch an app behind the active work without activating it; the window stays normally renderable for WGC/UIA instead of remaining minimized. Registered Windows activation protocols such as `ms-settings:display` are supported. Delegated app launches return a target only when exactly one new window is safely identifiable; pause between actions |
-| `activate_window` / `close_window` / `get_window` | Bring window to foreground / request a graceful WM_CLOSE and verify disappearance (otherwise returns `window_close_unconfirmed`) / query fresh window geometry & metadata |
+| `activate_window` / `minimize_window` / `close_window` / `get_window` | Bring window to foreground / minimize it directly with Win32 (no title-bar coordinates) / request a graceful WM_CLOSE and verify disappearance (otherwise returns `window_close_unconfirmed`) / query fresh window geometry & metadata |
 | `read_clipboard` / `write_clipboard` | Clipboard round-trip |
 | `browser_tabs` / `browser_state` / `browser_observe` / `browser_history` / `browser_back` / `browser_forward` / `browser_wait` | Manage exact tabs; `browser_observe` gives compact ref-only semantic state while `browser_state` keeps raw tokens for compatibility; navigate history and wait on page readiness/URL/text without synthetic sleeps |
 | `browser_events` / `browser_downloads` | Cursor-based console/network/lifecycle evidence; Chromium download progress and completed AI-profile files |
 | `browser_shutdown` | Close the entire browser only when this PC-Pilot tool instance launched it |
 | `browser_click` / `browser_type` / `browser_replace` / `browser_key` | Operate a raw token or compact `@eN` ref from the latest state/observe result; stale or changed targets are rejected |
-| `browser_click_point` | Click browser-viewport coordinates only when bound to the exact `screenshot_id` returned by `browser_state` / `browser_observe { with_screenshot: true }`; changed tab/document/URL or stale frames are rejected |
+| `browser_click_point` | Click browser-viewport coordinates only when bound to an exact `screenshot_id`; both explicit observations and post-action screenshots remain chainable for 30 seconds while the tab/document/URL identity is unchanged |
 | `browser_upload` | Select 1–20 explicit absolute local files on an already-observed `<input type=file>` and verify the browser received them; does not submit the surrounding form |
 
 ### Key parameters

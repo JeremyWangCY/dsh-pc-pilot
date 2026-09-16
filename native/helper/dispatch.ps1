@@ -263,7 +263,7 @@ function Invoke-MouseButtonAction {
   $rawY = Get-PayloadValue 'y'
   $dispatch = Get-Dispatch
   $win = $null
-  if ($app) {
+  if ($app -or (Get-PayloadValue 'hwnd')) {
     $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
     if ($dispatch -eq 'foreground') {
       $Result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -470,7 +470,7 @@ function Invoke-ActionRequest {
       $dispatch = Get-Dispatch
       $rawMods = [string](Get-PayloadValue 'modifiers')
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
@@ -637,10 +637,10 @@ function Invoke-ActionRequest {
       $app = Get-PayloadValue 'app'
       $text = Get-PayloadValue 'text'
       $dispatch = Get-Dispatch
-      if ($dispatch -eq 'background' -and -not $app) {
-        throw 'target_required: background type requires app; global SendInput requires dispatch=foreground'
+      if ($dispatch -eq 'background' -and -not $app -and -not (Get-PayloadValue 'hwnd')) {
+        throw 'target_required: background type requires app or hwnd; global SendInput requires dispatch=foreground'
       }
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
           $result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -711,11 +711,11 @@ function Invoke-ActionRequest {
       $key = $chord.Key
       $mods = $chord.Modifiers
       $dispatch = Get-Dispatch
-      if ($dispatch -eq 'background' -and -not $app) {
-        throw 'target_required: background key requires app; global SendInput requires dispatch=foreground'
+      if ($dispatch -eq 'background' -and -not $app -and -not (Get-PayloadValue 'hwnd')) {
+        throw 'target_required: background key requires app or hwnd; global SendInput requires dispatch=foreground'
       }
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
           $result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -758,7 +758,7 @@ function Invoke-ActionRequest {
       $dispatch = Get-Dispatch
       if ($dispatch -eq 'background' -and $rawMods) { throw 'background_unavailable: modifier scroll needs dispatch=foreground because UIA scroll patterns do not carry keyboard state' }
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
@@ -956,7 +956,7 @@ function Invoke-ActionRequest {
         if ($pathXs.Count -lt 2) { throw 'invalid drag path: at least two points required' }
       }
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') { $result.focus_ok = Assert-ForegroundTarget -Win $win }
         $r = $win.Rect
@@ -1075,7 +1075,7 @@ function Invoke-ActionRequest {
       if ($dur -gt 10000) { $dur = 10000 }
       $dispatch = Get-Dispatch
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         if ($dispatch -eq 'foreground') {
           $result.focus_ok = Assert-ForegroundTarget -Win $win
@@ -1458,7 +1458,7 @@ function Invoke-ActionRequest {
       $rawMods = [string](Get-PayloadValue 'modifiers')
       $dispatch = Get-Dispatch
       $win = $null
-      if ($app) {
+      if ($app -or (Get-PayloadValue 'hwnd')) {
         $win = Resolve-TargetWindow -App $app -Index ([int](Get-PayloadValue 'window_index'))
         $r = $win.Rect
         if ($x -ge $r.Left -and $x -le $r.Right -and $y -ge $r.Top -and $y -le $r.Bottom) {
@@ -1500,6 +1500,25 @@ function Invoke-ActionRequest {
       $result.title = $win.Title
       $result.activated = [bool]$activated
       $result.message = "Activated window '$($win.Title)' (hwnd=$($win.Hwnd.ToInt64()), activated=$activated)"
+    }
+
+    'minimize_window' {
+      $app = Get-PayloadValue 'app'
+      $idx = [int](Get-PayloadValue 'window_index')
+      $hwndVal = Get-PayloadValue 'hwnd'
+      $hwnd = if ($hwndVal) { [int64]$hwndVal } else { 0 }
+      $win = Resolve-TargetWindow -App $app -Index $idx -Hwnd $hwnd
+      $targetHwnd = $win.Hwnd
+      $null = [DshWin32]::ShowWindow($targetHwnd, 6)
+      for ($i = 0; $i -lt 10 -and -not [DshWin32]::IsIconic($targetHwnd); $i++) {
+        Start-Sleep -Milliseconds 50
+      }
+      $minimized = [DshWin32]::IsIconic($targetHwnd)
+      $result.hwnd = $targetHwnd.ToInt64()
+      $result.title = $win.Title
+      $result.minimized = [bool]$minimized
+      if (-not $minimized) { throw 'window_minimize_unconfirmed: ShowWindow(SW_MINIMIZE) returned but the target is not minimized' }
+      $result.message = "Minimized window '$($win.Title)' (hwnd=$($targetHwnd.ToInt64()))"
     }
 
     'close_window' {
@@ -1939,7 +1958,7 @@ finally {
   # If the target app (e.g. Edge/Chromium UIA Invoke, WM messages) activates itself,
   # immediately demote the target window to bottom and restore the user's active window!
   $foregroundLaunchRequested = ($Action -eq 'launch_app' -and [bool](Get-PayloadValue 'activate'))
-  if ($dispatchMode -eq 'background' -and -not $foregroundLaunchRequested -and $Action -notin @('activate_window') -and $prevUserFg -ne [IntPtr]::Zero) {
+  if ($dispatchMode -eq 'background' -and -not $foregroundLaunchRequested -and $Action -notin @('activate_window', 'minimize_window') -and $prevUserFg -ne [IntPtr]::Zero) {
     $curFg = [DshWin32]::GetForegroundWindow()
     if ($curFg -ne [IntPtr]::Zero -and $curFg -ne $prevUserFg) {
       [DshWin32]::PushWindowToBottom($curFg) | Out-Null

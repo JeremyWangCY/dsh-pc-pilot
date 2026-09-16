@@ -332,7 +332,7 @@ function Resolve-TargetWindow {
   # silently unminimize with SW_SHOWNOACTIVATE so rect and UIA are valid without stealing focus
   if ($null -ne $target -and [DshWin32]::IsIconic($target.Hwnd)) {
     $currAct = Get-PayloadValue 'action'
-    if ($currAct -notin @('get_window', 'list_windows', 'activate_window', 'close_window')) {
+    if ($currAct -notin @('get_window', 'list_windows', 'activate_window', 'minimize_window', 'close_window')) {
       if ((Get-Dispatch) -ne 'foreground') { throw 'background_unavailable: target window is minimized; background inspection cannot observe minimized windows. Use activate_window to restore it to the foreground first, or use foreground dispatch if permitted.' }
       [DshWin32]::ShowWindow($target.Hwnd, 4) | Out-Null
       [DshWin32]::SetWindowPos($target.Hwnd, [DshWin32]::HWND_BOTTOM, 0, 0, 0, 0, 0x0053) | Out-Null
@@ -538,7 +538,7 @@ function Get-AccessibilityDelta {
 }
 
 function Get-AccessibilityTree {
-  param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS, $WinRect = $null)
+  param([IntPtr]$Hwnd, [int]$MaxElements = $script:MAX_ELEMENTS, $WinRect = $null, [int]$MaxDepth = 0)
   $script:cachedTreeHwnd = $Hwnd
   $script:cachedElements = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
   $script:cachedIdentities = New-Object System.Collections.Generic.List[string]
@@ -547,7 +547,27 @@ function Get-AccessibilityTree {
     try { $WinRect = [DshWin32]::GetRect($Hwnd) } catch { }
   }
   $aeRoot = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
-  $children = $aeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  if ($MaxDepth -gt 0) {
+    # Explorer-backed common dialogs can expose the entire Shell namespace as
+    # descendants. Walk only a few ControlView levels so filename, location,
+    # and action controls stay available without enumerating the filesystem.
+    $children = New-Object System.Collections.Generic.List[System.Windows.Automation.AutomationElement]
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    $queue.Enqueue([PSCustomObject]@{ element = $aeRoot; depth = 0 })
+    while ($queue.Count -gt 0 -and $children.Count -lt $MaxElements) {
+      $entry = $queue.Dequeue()
+      if ([int]$entry.depth -ge $MaxDepth) { continue }
+      $child = $walker.GetFirstChild($entry.element)
+      while ($null -ne $child -and $children.Count -lt $MaxElements) {
+        $children.Add($child)
+        $queue.Enqueue([PSCustomObject]@{ element = $child; depth = ([int]$entry.depth + 1) })
+        $child = $walker.GetNextSibling($child)
+      }
+    }
+  } else {
+    $children = $aeRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  }
   $out = New-Object System.Collections.Generic.List[object]
   $count = 0
   foreach ($el in $children) {
